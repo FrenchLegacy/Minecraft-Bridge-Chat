@@ -104,7 +104,7 @@ class CommandResponseListener extends EventEmitter {
             guildId: guildId,
             command: command,
             commandType: commandType.toLowerCase(),
-            targetPlayer: targetPlayer.toLowerCase(),
+            targetPlayer: targetPlayer,
             createdAt: Date.now(),
             timeout: null,
             resolved: false,
