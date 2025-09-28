@@ -1093,7 +1093,94 @@
                 "description": "You do not have permission to mute"
               }
             ]
-          },
+          }
+        },
+        "online": {
+          "success": [
+            {
+              "pattern": "Online Members: (\\d+)",
+              "groups": ["count"],
+              "description": "Online members count only"
+            },
+            {
+              "pattern": "Online Members: (\\d+)\\s*\\n(.+)",
+              "groups": ["count", "membersList"],
+              "description": "Online members with list"
+            },
+            {
+              "pattern": "Guild Members Online \\((\\d+)\\): (.+)",
+              "groups": ["count", "membersList"],
+              "description": "Online members with count and list"
+            },
+            {
+              "pattern": "(\\d+) guild members online: (.+)",
+              "groups": ["count", "membersList"],
+              "description": "Alternative online members format"
+            },
+            {
+              "pattern": "\\[([^\\]]+)\\] ([^●]+) ●",
+              "groups": ["rank", "playerName"],
+              "description": "Member with rank"
+            }
+          ],
+          "error": [
+            {
+              "pattern": "You do not have permission to use this command!",
+              "groups": [],
+              "description": "No permission to check online members"
+            },
+            {
+              "pattern": "You are not in a guild!",
+              "groups": [],
+              "description": "Not in a guild"
+            }
+          ]
+        },
+        "guildlist": {
+          "success": [
+            {
+              "pattern": "Guild Name: (.+)",
+              "groups": ["guildName"],
+              "description": "Guild name header"
+            },
+            {
+              "pattern": "Total Members: (\\d+)",
+              "groups": ["totalMembers"],
+              "description": "Total members count"
+            },
+            {
+              "pattern": "Online Members: (\\d+)",
+              "groups": ["onlineMembers"],
+              "description": "Online members count"
+            },
+            {
+              "pattern": "Offline Members: (\\d+)",
+              "groups": ["offlineMembers"],
+              "description": "Offline members count"
+            },
+            {
+              "pattern": "-- (.+) --",
+              "groups": ["rankName"],
+              "description": "Rank section header"
+            },
+            {
+              "pattern": "\\[([^\\]]+)\\] ([\\w_]+) ●",
+              "groups": ["rank", "username"],
+              "description": "Member with rank"
+            }
+          ],
+          "error": [
+            {
+              "pattern": "You do not have permission to use this command!",
+              "groups": [],
+              "description": "No permission to list guild members"
+            },
+            {
+              "pattern": "You are not in a guild!",
+              "groups": [],
+              "description": "Not in a guild"
+            }
+          ],
           "unmute": {
             "success": [
               {

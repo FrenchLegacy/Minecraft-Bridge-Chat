@@ -613,7 +613,6 @@ class BridgeCoordinator {
             const guildConfigs = this.config.get('guilds') || [];
             return guildConfigs.find(guild => guild.id === guildId) || null;
         } catch (error) {
-            logger.logError(error, `Error getting guild config for ID: ${guildId}`);
             return null;
         }
     }

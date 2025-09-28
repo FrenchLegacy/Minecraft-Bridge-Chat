@@ -283,6 +283,29 @@ module.exports = {
                     .setDescription('Command to execute (DO NOT include /g or /guild prefix)')
                     .setRequired(true)
             )
+    )
+    .addSubcommand((subcommand) =>
+        subcommand
+          .setName("list")
+          .setDescription("List guild members (online, offline, or all)")
+          .addStringOption((option) =>
+            option
+              .setName("guildname")
+              .setDescription("Name of the guild")
+              .setRequired(true)
+              .setAutocomplete(true)
+          )
+          .addStringOption((option) =>
+            option
+              .setName("type")
+              .setDescription("Type of members to list")
+              .setRequired(true)
+              .addChoices(
+                { name: "Online members", value: "online" },
+                { name: "Offline members", value: "offline" },
+                { name: "All members", value: "all" }
+              )
+          )
     ),
     
     permission: 'user', // Base permission, subcommands can override

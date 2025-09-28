@@ -413,8 +413,8 @@ class SlashCommandHandler extends EventEmitter {
                 return [];
             }
             
-            // Return the ranks for this guild
-            return guild.ranks || [];
+            // Return the ranks for this guild in reverse order
+            return (guild.ranks || []).slice().reverse();
             
         } catch (error) {
             logger.logError(error, `Error getting ranks for guild '${guildName}'`);
