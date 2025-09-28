@@ -255,6 +255,10 @@ class BridgeCoordinator {
      * @param {object} messageData - Discord message data
      */
     async handleDiscordMessage(messageData) {
+        let successCount = 0;
+        let errorCount = 0;
+        let connectedGuilds = [];
+
         try {
             logger.debug(`[DC→MC] Processing message: ${JSON.stringify(messageData)}`);
             
@@ -264,32 +268,142 @@ class BridgeCoordinator {
                 return;
             }
 
-            // Get guild configuration
-            const guildConfig = this.getGuildConfig(messageData.guildId);
-            if (!guildConfig) {
-                logger.warn(`Guild configuration not found for Discord message: ${messageData.guildId}`);
+            // Validate message data
+            if (!messageData || !messageData.content || !messageData.author) {
+                logger.debug(`[DC→MC] Invalid message data, skipping`);
                 return;
             }
-
-            logger.discord(`[DC→MC] Processing message from ${guildConfig.name}: ${messageData.author.username}`);
 
             // Check if Minecraft manager is ready
-            if (!this.minecraftManager.isConnected(messageData.guildId)) {
-                logger.warn(`[DC→MC] Minecraft not connected for guild ${messageData.guildId}, skipping message`);
-                await this.addErrorReaction(messageData);
+            if (!this.minecraftManager || !this.minecraftManager._isStarted) {
+                const error = new Error('Minecraft manager not ready');
+                await this.handleBridgeError(messageData, error, 0, 0);
                 return;
             }
 
-            // Send to Minecraft
-            logger.debug(`[DC→MC] Sending message to Minecraft...`);
-            const result = await this.minecraftManager.sendMessage(messageData, guildConfig);
-            logger.debug(`[DC→MC] Minecraft send result: ${JSON.stringify(result)}`);
+            // Determine target chat type based on Discord channel
+            const chatType = this.determineChatTypeFromChannel(messageData.channelType);
+            if (!chatType) {
+                logger.debug(`[DC→MC] Unknown channel type: ${messageData.channelType}, skipping message`);
+                return;
+            }
 
-            logger.discord(`[DC→MC] ✅ Message successfully bridged to Minecraft`);
+            // Get connected Minecraft guilds
+            connectedGuilds = this.minecraftManager.getConnectedGuilds();
+            if (!connectedGuilds || connectedGuilds.length === 0) {
+                const error = new Error('No connected Minecraft guilds available');
+                await this.handleBridgeError(messageData, error, 0, 0);
+                return;
+            }
+
+            // Format message for Minecraft
+            const formattedMessage = this.formatDiscordMessageForMinecraft(messageData, chatType);
+            
+            logger.discord(`[DC→MC] Processing ${chatType} message from Discord: ${messageData.author.displayName} -> "${messageData.content}"`);
+
+            // Send message to all connected guilds with error tracking
+            const deliveryPromises = connectedGuilds.map(async (guildInfo) => {
+                try {
+                    await this.sendMessageToMinecraft(guildInfo.guildId, formattedMessage, chatType);
+                    logger.bridge(`[DC→MC] ✅ ${chatType} message sent to ${guildInfo.guildName}`);
+                    return { success: true, guildInfo };
+                } catch (error) {
+                    logger.logError(error, `Failed to send ${chatType} message to guild ${guildInfo.guildName}`);
+                    return { success: false, guildInfo, error };
+                }
+            });
+
+            // Wait for all deliveries to complete
+            const results = await Promise.allSettled(deliveryPromises);
+            
+            // Count actual successes and failures
+            successCount = 0;
+            errorCount = 0;
+            let firstError = null;
+
+            results.forEach(result => {
+                if (result.status === 'fulfilled') {
+                    if (result.value.success) {
+                        successCount++;
+                    } else {
+                        errorCount++;
+                        if (!firstError) {
+                            firstError = result.value.error || new Error('Unknown delivery error');
+                        }
+                    }
+                } else {
+                    errorCount++;
+                    if (!firstError) {
+                        firstError = result.reason || new Error('Unknown delivery error');
+                    }
+                }
+            });
+
+            if (errorCount > 0) {
+                // Some deliveries failed
+                await this.handleBridgeError(messageData, firstError, successCount, connectedGuilds.length);
+            } else {
+                // All deliveries successful - no success reaction, just log
+                logger.discord(`[DC→MC] ✅ Discord message bridged successfully to all ${connectedGuilds.length} Minecraft guilds`);
+            }
 
         } catch (error) {
-            logger.logError(error, `Error bridging Discord message to Minecraft from guild ${messageData.guildId}`);
-            await this.addErrorReaction(messageData);
+            logger.logError(error, `Unexpected error bridging Discord message to Minecraft`);
+            await this.handleBridgeError(messageData, error, successCount, connectedGuilds.length);
+        }
+    }
+
+    /**
+     * Get appropriate log channel for event type
+     * @param {string} eventType - Type of event
+     * @param {object} logChannels - Log channels configuration
+     * @returns {string} Channel ID to use
+     */
+    determineChatTypeFromChannel(channelType) {
+        switch (channelType) {
+            case 'chat':
+                return 'guild';
+            case 'staff':
+                return 'officer';
+            default:
+                return null;
+        }
+    }
+
+    /**
+     * Format Discord message for Minecraft
+     * @param {object} messageData - Discord message data
+     * @param {string} chatType - Target chat type (guild/officer)
+     * @returns {string} Formatted message
+     */
+    formatDiscordMessageForMinecraft(messageData, chatType) {
+        const username = messageData.author.displayName || messageData.author.username;
+        const content = messageData.content;
+        
+        // Add Discord prefix to distinguish from native Minecraft messages
+        const prefix = "Discord >";
+        
+        // Format: Discord > Username: message content
+        return `${prefix} ${username}: ${content}`;
+    }
+
+    /**
+     * Send message to Minecraft guild
+     * @param {string} guildId - Guild ID
+     * @param {string} message - Formatted message
+     * @param {string} chatType - Chat type (guild/officer)
+     */
+    async sendMessageToMinecraft(guildId, message, chatType) {
+        try {
+            // For officer chat, use /oc command, for guild chat use /gc command
+            const command = chatType === 'officer' ? `/oc ${message}` : `/gc ${message}`;
+            
+            // Use executeCommand instead of sendMessage for proper guild chat commands
+            await this.minecraftManager.executeCommand(guildId, command);
+            
+        } catch (error) {
+            logger.logError(error, `Failed to send ${chatType} message to guild ${guildId}`);
+            throw error;
         }
     }
 
