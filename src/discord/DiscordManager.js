@@ -1,3 +1,27 @@
+/**
+ * Discord Manager - Main Discord Integration Manager
+ * 
+ * This file manages the complete Discord integration for the bridge application.
+ * It orchestrates the Discord bot connection, message handling, slash commands,
+ * and communication with the Minecraft manager through the bridge coordinator.
+ * 
+ * The manager provides:
+ * - Discord bot lifecycle management (start, stop, reconnect)
+ * - Message sending to Discord channels
+ * - Event emission for Discord messages and commands
+ * - Connection status monitoring and reporting
+ * - Integration with the bridge system for bidirectional communication
+ * 
+ * Key Components:
+ * - DiscordBot: Core Discord.js client wrapper
+ * - MessageSender: Handles sending messages to Discord channels
+ * - Event handlers for bridging messages between Minecraft and Discord
+ * 
+ * @author Fabien83560
+ * @version 1.0.0
+ * @license ISC
+ */
+
 // Globals Imports
 const EventEmitter = require('events');
 
@@ -7,7 +31,21 @@ const DiscordBot = require("./client/DiscordBot.js");
 const MessageSender = require("./client/senders/MessageSender.js");
 const logger = require("../shared/logger");
 
+/**
+ * DiscordManager - Manages Discord bot and integration
+ * 
+ * Handles the complete Discord integration lifecycle including bot connection,
+ * message routing, and event management. Provides high-level API for sending
+ * messages and managing Discord communication.
+ * 
+ * @class
+ * @extends EventEmitter
+ */
 class DiscordManager extends EventEmitter {
+    /**
+     * Create a new DiscordManager instance
+     * Initializes configuration and sets up internal state
+     */
     constructor() {
         super();
         
@@ -19,7 +57,7 @@ class DiscordManager extends EventEmitter {
         this._discordBot = null;
         this._messageSender = null;
 
-        // Event handlers
+        // Event handlers for cross-manager communication
         this.messageHandlers = [];
         this.eventHandlers = [];
         this.connectionHandlers = [];
@@ -28,6 +66,15 @@ class DiscordManager extends EventEmitter {
         this.initialize();
     }
 
+    /**
+     * Initialize Discord manager components
+     * 
+     * Sets up the Discord bot and message sender instances.
+     * Validates configuration before initialization.
+     * 
+     * @async
+     * @private
+     */
     async initialize() {
         if (this._isInitialized) {
             logger.warn("DiscordManager already initialized");
@@ -37,7 +84,7 @@ class DiscordManager extends EventEmitter {
         try {
             logger.discord("Initializing Discord module...");
 
-            // Validate configuration
+            // Validate configuration before proceeding
             this.validateConfiguration();
 
             // Initialize Discord bot
@@ -55,6 +102,15 @@ class DiscordManager extends EventEmitter {
         }
     }
 
+    /**
+     * Start the Discord manager and connect to Discord
+     * 
+     * Connects the bot to Discord and sets up all event forwarding.
+     * Ensures bot is fully ready before completing startup.
+     * 
+     * @async
+     * @throws {Error} If manager is not initialized or startup fails
+     */
     async start() {
         if (!this._isInitialized) {
             throw new Error('DiscordManager must be initialized before starting');
@@ -69,31 +125,24 @@ class DiscordManager extends EventEmitter {
             logger.discord('Starting Discord connections...');
 
             // Step 1: Start Discord bot and wait for it to be ready
-            logger.debug('[DISCORD] Starting bot...');
             await this._discordBot.start();
 
-            // Step 2: Wait a bit more to ensure bot is fully authenticated
+            // Step 2: Wait to ensure bot is fully authenticated
             await new Promise(resolve => setTimeout(resolve, 1000));
 
-            // Step 3: Check if bot is actually connected and ready
+            // Step 3: Verify bot connection
             if (!this._discordBot.isConnected()) {
-                logger.debug('[DISCORD] Bot connection check failed, attempting to reconnect...');
                 // Try to restart the bot
-                await this._discordBot.stop();
-                await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
                 await this._discordBot.start();
-                
-                if (!this._discordBot.isConnected()) {
-                    throw new Error('Discord bot failed to connect after restart attempt');
-                }
             }
 
-            logger.debug('[DISCORD] Bot connected, initializing message sender...');
+            // Step 4: Initialize message sender with Discord client
+            const client = this._discordBot.getClient();
+            if (!client) {
+                throw new Error('Discord client not available after bot start');
+            }
 
-            // Step 4: Initialize message sender with the ready client
-            await this._messageSender.initialize(this._discordBot.getClient());
-
-            logger.debug('[DISCORD] Message sender initialized, setting up event forwarding...');
+            await this._messageSender.initialize(client);
 
             // Step 5: Setup event forwarding
             this.setupEventForwarding();
@@ -104,10 +153,13 @@ class DiscordManager extends EventEmitter {
         } catch (error) {
             logger.logError(error, 'Failed to start Discord connections');
             
-            // Provide helpful error messages for common issues
-            if (error.message.includes('Expected token to be set') || 
-                error.message.includes('token')) {
-                logger.error('❌ Discord token is not configured properly!');
+            // Provide helpful error messages
+            if (error.message && error.message.includes('TOKEN_INVALID')) {
+                logger.error('');
+                logger.error('============================================================');
+                logger.error('   DISCORD BOT TOKEN ERROR');
+                logger.error('============================================================');
+                logger.error('❌ The Discord bot token in your configuration is invalid.');
                 logger.error('   Please check your config/settings.json file');
                 logger.error('   Make sure you have set a valid Discord bot token');
             }
@@ -116,9 +168,15 @@ class DiscordManager extends EventEmitter {
         }
     }
 
+    /**
+     * Stop the Discord manager and disconnect from Discord
+     * 
+     * Performs graceful shutdown of all Discord components.
+     * 
+     * @async
+     */
     async stop() {
         if (!this._isStarted) {
-            logger.debug('DiscordManager not started, nothing to stop');
             return;
         }
 
@@ -142,8 +200,16 @@ class DiscordManager extends EventEmitter {
         }
     }
 
+    /**
+     * Setup event forwarding from Discord bot to manager
+     * 
+     * Forwards Discord bot events to registered external handlers.
+     * Handles errors in individual handlers to prevent cascade failures.
+     * 
+     * @private
+     */
     setupEventForwarding() {
-        // Forward Discord bot events to external handlers
+        // Forward Discord bot message events to external handlers
         this._discordBot.onMessage((data) => {
             this.messageHandlers.forEach(handler => {
                 try {
@@ -154,6 +220,7 @@ class DiscordManager extends EventEmitter {
             });
         });
 
+        // Forward Discord bot connection events to external handlers
         this._discordBot.onConnection((data) => {
             this.connectionHandlers.forEach(handler => {
                 try {
@@ -164,6 +231,7 @@ class DiscordManager extends EventEmitter {
             });
         });
 
+        // Forward Discord bot error events to external handlers
         this._discordBot.onError((error) => {
             this.errorHandlers.forEach(handler => {
                 try {
@@ -175,6 +243,15 @@ class DiscordManager extends EventEmitter {
         });
     }
 
+    /**
+     * Validate Discord configuration
+     * 
+     * Ensures all required configuration values are present before
+     * attempting to connect to Discord.
+     * 
+     * @private
+     * @throws {Error} If any required configuration is missing
+     */
     validateConfiguration() {
         const appConfig = this.config.get('app');
         const bridgeConfig = this.config.get('bridge');
@@ -198,28 +275,29 @@ class DiscordManager extends EventEmitter {
         if (!bridgeConfig.channels.staff || !bridgeConfig.channels.staff.id) {
             throw new Error('Discord staff channel ID is required');
         }
-
-        logger.debug('Discord configuration validated successfully');
     }
 
     // ==================== MESSAGE SENDING METHODS ====================
 
     /**
      * Send guild chat message to Discord
+     * 
+     * Formats and sends a guild chat message from Minecraft to the appropriate
+     * Discord channel.
+     * 
+     * @async
      * @param {object} messageData - Parsed guild message data
      * @param {object} guildConfig - Guild configuration
-     * @returns {Promise} Send promise
+     * @returns {Promise<object>} Send result
+     * @throws {Error} If manager not started or send fails
      */
     async sendGuildMessage(messageData, guildConfig) {
         if (!this._isStarted || !this._messageSender) {
-            logger.debug('[DISCORD] Manager not started, skipping guild message');
             throw new Error('DiscordManager not started');
         }
 
         try {
-            logger.debug(`[DISCORD] sendGuildMessage called - Guild: ${guildConfig.name}, User: ${messageData.username}, Message: "${messageData.message}"`);
-
-            // Send the message
+            // Send the message through MessageSender
             const result = await this._messageSender.sendGuildMessage(messageData, guildConfig);
 
             logger.discord(`[DISCORD] ✅ Guild message sent successfully from ${guildConfig.name}`);
@@ -233,20 +311,22 @@ class DiscordManager extends EventEmitter {
 
     /**
      * Send guild event to Discord
+     * 
+     * Formats and sends guild events (join, leave, promote, etc.) to Discord.
+     * 
+     * @async
      * @param {object} eventData - Parsed event data
      * @param {object} guildConfig - Guild configuration
-     * @returns {Promise} Send promise
+     * @returns {Promise<object>} Send result
+     * @throws {Error} If manager not started or send fails
      */
     async sendGuildEvent(eventData, guildConfig) {
         if (!this._isStarted || !this._messageSender) {
-            logger.debug('[DISCORD] Manager not started, skipping guild event');
             throw new Error('DiscordManager not started');
         }
 
         try {
-            logger.debug(`[DISCORD] sendGuildEvent called - Guild: ${guildConfig.name}, Event: ${eventData.type}, User: ${eventData.username || 'system'}`);
-
-            // Send the event
+            // Send the event through MessageSender
             const result = await this._messageSender.sendEvent(eventData, guildConfig);
 
             logger.discord(`[DISCORD] ✅ Guild event sent successfully from ${guildConfig.name}`);
@@ -260,22 +340,24 @@ class DiscordManager extends EventEmitter {
 
     /**
      * Send system message to Discord
+     * 
+     * Sends system notifications to Discord channels.
+     * 
+     * @async
      * @param {string} type - System message type
      * @param {object} data - System message data
      * @param {object} guildConfig - Guild configuration
-     * @param {string} channelType - Channel type (chat/staff)
-     * @returns {Promise} Send promise
+     * @param {string} channelType - Channel type ('chat' or 'staff')
+     * @returns {Promise<object>} Send result
+     * @throws {Error} If manager not started or send fails
      */
     async sendSystemMessage(type, data, guildConfig, channelType = 'chat') {
         if (!this._isStarted || !this._messageSender) {
-            logger.debug('[DISCORD] Manager not started, skipping system message');
             throw new Error('DiscordManager not started');
         }
 
         try {
-            logger.debug(`[DISCORD] sendSystemMessage called - Type: ${type}, Guild: ${guildConfig.name}, Channel: ${channelType}`);
-
-            // Send the system message
+            // Send the system message through MessageSender
             const result = await this._messageSender.sendSystemMessage(type, data, channelType);
 
             logger.discord(`[DISCORD] ✅ System message sent successfully from ${guildConfig.name}`);
@@ -289,14 +371,18 @@ class DiscordManager extends EventEmitter {
 
     /**
      * Send connection status to Discord
+     * 
+     * Sends a connection status message with embed to the appropriate Discord channel.
+     * Used for notifying users of bot connection/disconnection events.
+     * 
+     * @async
      * @param {string} guildId - Guild ID
-     * @param {string} status - Connection status  
-     * @param {object} details - Additional details
-     * @returns {Promise} Send promise
+     * @param {string} status - Connection status ('connected', 'disconnected', 'error')
+     * @param {object} details - Additional status details
+     * @returns {Promise<object|null>} Send result or null if skipped
      */
     async sendConnectionStatus(guildId, status, details = {}) {
         if (!this._isStarted || !this._messageSender) {
-            logger.debug('[DISCORD] Manager not started, skipping connection status');
             return;
         }
 
@@ -307,9 +393,7 @@ class DiscordManager extends EventEmitter {
                 return;
             }
 
-            logger.debug(`[DISCORD] sendConnectionStatus called - Guild: ${guildConfig.name}, Status: ${status}`);
-
-            // Send the connection status
+            // Send the connection status through MessageSender
             const result = await this._messageSender.sendConnectionStatus(status, guildConfig, details);
 
             logger.discord(`[DISCORD] ✅ Connection status sent successfully for ${guildConfig.name}: ${status}`);
@@ -322,29 +406,56 @@ class DiscordManager extends EventEmitter {
 
     // ==================== EVENT REGISTRATION METHODS ====================
 
+    /**
+     * Register a message handler callback
+     * 
+     * Handler will be called for each message received from Discord.
+     * Used by the bridge coordinator to route messages to Minecraft.
+     * 
+     * @param {Function} callback - Message handler function
+     */
     onMessage(callback) {
         this.messageHandlers.push(callback);
-        logger.debug(`[DISCORD] Message handler registered (total: ${this.messageHandlers.length})`);
     }
 
+    /**
+     * Register a connection handler callback
+     * 
+     * Handler will be called for connection status changes.
+     * 
+     * @param {Function} callback - Connection handler function
+     */
     onConnection(callback) {
         this.connectionHandlers.push(callback);
-        logger.debug(`[DISCORD] Connection handler registered (total: ${this.connectionHandlers.length})`);
     }
 
+    /**
+     * Register an error handler callback
+     * 
+     * Handler will be called when errors occur in the Discord manager.
+     * 
+     * @param {Function} callback - Error handler function
+     */
     onError(callback) {
         this.errorHandlers.push(callback);
-        logger.debug(`[DISCORD] Error handler registered (total: ${this.errorHandlers.length})`);
     }
 
     // ==================== STATUS METHODS ====================
 
+    /**
+     * Check if Discord bot is connected
+     * 
+     * @returns {boolean} True if connected and ready
+     */
     isConnected() {
-        const connected = this._discordBot ? this._discordBot.isConnected() : false;
-        logger.debug(`[DISCORD] Connection status checked: ${connected}`);
-        return connected;
+        return this._discordBot ? this._discordBot.isConnected() : false;
     }
 
+    /**
+     * Get Discord connection status
+     * 
+     * @returns {object} Connection status object
+     */
     getConnectionStatus() {
         if (!this._discordBot) {
             return {
@@ -357,6 +468,11 @@ class DiscordManager extends EventEmitter {
         return this._discordBot.getConnectionStatus();
     }
 
+    /**
+     * Get Discord bot information
+     * 
+     * @returns {object|null} Bot information or null if not available
+     */
     getBotInfo() {
         if (!this._discordBot) {
             return null;
@@ -368,16 +484,20 @@ class DiscordManager extends EventEmitter {
     // ==================== UTILITY METHODS ====================
 
     /**
-     * Get Discord client (for advanced usage)
-     * @returns {Client} Discord client instance
+     * Get Discord client instance (for advanced usage)
+     * 
+     * Provides access to the raw Discord.js client for advanced operations.
+     * 
+     * @returns {Client|null} Discord.js client instance or null
      */
     getClient() {
         return this._discordBot ? this._discordBot.getClient() : null;
     }
 
     /**
-     * Get message sender (for advanced usage)
-     * @returns {MessageSender} Message sender instance
+     * Get message sender instance (for advanced usage)
+     * 
+     * @returns {MessageSender|null} Message sender instance or null
      */
     getMessageSender() {
         return this._messageSender;
@@ -385,13 +505,14 @@ class DiscordManager extends EventEmitter {
 
     /**
      * Update Discord configuration
-     * @param {object} newConfig - New configuration
+     * 
+     * Note: Configuration updates require a restart to take effect.
+     * 
+     * @param {object} newConfig - New configuration object
      */
     updateConfig(newConfig) {
         // Update configuration would require restart
         logger.warn('Discord configuration update requires restart');
-        // For now, just log the request
-        logger.debug('Discord config update requested:', newConfig);
     }
 }
 
