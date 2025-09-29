@@ -1,3 +1,27 @@
+/**
+ * Discord Bot - Core Discord.js Client Wrapper
+ * 
+ * This file wraps the Discord.js client and manages the bot's lifecycle, event handling,
+ * and connection to Discord's gateway. It coordinates between multiple handlers including
+ * message handling, slash commands, and command detection from Discord messages.
+ * 
+ * The bot provides:
+ * - Discord gateway connection management with auto-reconnect
+ * - Event forwarding to handlers (messages, interactions, errors)
+ * - Bot presence/status management
+ * - Handler initialization and coordination
+ * - Connection status monitoring
+ * 
+ * Handlers:
+ * - MessageHandler: Processes incoming Discord messages for bridging
+ * - SlashCommandHandler: Handles slash command registration and execution
+ * - CommandDetectionHandler: Detects text-based commands in messages
+ * 
+ * @author Fabien83560
+ * @version 1.0.0
+ * @license ISC
+ */
+
 // Globals Imports
 const { Client, GatewayIntentBits, ActivityType } = require('discord.js');
 const EventEmitter = require('events');
@@ -7,24 +31,39 @@ const BridgeLocator = require("../../bridgeLocator.js");
 const MessageHandler = require("./handlers/MessageHandler.js");
 const SlashCommandHandler = require("./handlers/SlashCommandHandler.js");
 const CommandDetectionHandler = require('./handlers/CommandDetectionHandler');
-
 const logger = require("../../shared/logger");
 
+/**
+ * DiscordBot - Discord.js client wrapper with handler management
+ * 
+ * Extends EventEmitter to provide custom event handling for the bridge application.
+ * Manages Discord connection, handlers, and event forwarding.
+ * 
+ * @class
+ * @extends EventEmitter
+ */
 class DiscordBot extends EventEmitter {
+    /**
+     * Create a new DiscordBot instance
+     * Initializes configuration and prepares handlers
+     */
     constructor() {
         super();
 
         const mainBridge = BridgeLocator.getInstance();
         this.config = mainBridge.config;
 
+        // Discord.js client
         this.client = null;
+        
+        // Connection state
         this._isConnected = false;
         this._isReady = false;
         this.connectionAttempts = 0;
         this.maxConnectionAttempts = 5;
         this.reconnectTimeout = null;
 
-        // Handlers
+        // Handler instances
         this.messageHandler = null;
         this.slashCommandHandler = null;
         this.commandDetectionHandler = null;
@@ -32,27 +71,36 @@ class DiscordBot extends EventEmitter {
         this.initializeClient();
     }
 
+    /**
+     * Initialize Discord client and handlers
+     * 
+     * Creates the Discord.js client with required intents and initializes
+     * all handler instances (but doesn't connect them to the client yet).
+     * 
+     * @private
+     */
     initializeClient() {
         try {
-            // Create Discord client with necessary intents (including reactions for error handling)
+            // Create Discord client with necessary intents
+            // GuildMessageReactions added for error handling (adding reaction emojis)
             this.client = new Client({
                 intents: [
                     GatewayIntentBits.Guilds,
                     GatewayIntentBits.GuildMessages,
                     GatewayIntentBits.MessageContent,
                     GatewayIntentBits.GuildMembers,
-                    GatewayIntentBits.GuildMessageReactions // Added for error handling reactions
+                    GatewayIntentBits.GuildMessageReactions
                 ]
             });
 
-            // Initialize handlers (but don't initialize them with client yet)
+            // Initialize handlers (they will be connected to client later)
             this.messageHandler = new MessageHandler();
             this.slashCommandHandler = new SlashCommandHandler();
             this.commandDetectionHandler = new CommandDetectionHandler();
 
             this.setupEventHandlers();
             
-            logger.discord('Discord client initialized with intents (including reactions)');
+            logger.discord('Discord client initialized with intents');
 
         } catch (error) {
             logger.logError(error, 'Failed to initialize Discord client');
@@ -60,7 +108,17 @@ class DiscordBot extends EventEmitter {
         }
     }
 
+    /**
+     * Setup Discord client event handlers
+     * 
+     * Registers event listeners for Discord events including ready, disconnect,
+     * reconnecting, errors, messages, and member events. Forwards events to
+     * appropriate handlers and emits custom events for the application.
+     * 
+     * @private
+     */
     setupEventHandlers() {
+        // Ready event - bot is connected and ready
         this.client.on('clientReady', async () => {
             this._isConnected = true;
             this._isReady = true;
@@ -113,7 +171,6 @@ class DiscordBot extends EventEmitter {
         // Error event
         this.client.on('error', (error) => {
             logger.logError(error, 'Discord bot error');
-            
             this.emit('error', error);
         });
 
@@ -122,30 +179,27 @@ class DiscordBot extends EventEmitter {
             logger.warn(`Discord bot warning: ${warning}`);
         });
 
-        // Message event - handle both regular messages and commands
-        this.client.on('messageCreate', async (message) => {            
+        // Message create event - forward to message handler
+        this.client.on('messageCreate', async (message) => {
             if (!this._isReady)
                 return;
 
-            // Handle regular message
             if (this.messageHandler) {
                 await this.messageHandler.handleMessage(message);
             }
         });
 
-        // Guild member add
+        // Guild member add event
         this.client.on('guildMemberAdd', (member) => {
-            logger.debug(`New member joined: ${member.user.tag}`);
             this.emit('memberJoin', member);
         });
 
-        // Guild member remove
+        // Guild member remove event
         this.client.on('guildMemberRemove', (member) => {
-            logger.debug(`Member left: ${member.user.tag}`);
             this.emit('memberLeave', member);
         });
 
-        // Rate limit handling
+        // Rate limit event
         this.client.on('rateLimit', (info) => {
             logger.warn(`Discord rate limit hit: ${JSON.stringify(info)}`);
         });
@@ -156,12 +210,17 @@ class DiscordBot extends EventEmitter {
         });
 
         this.client.on('shardReady', () => {
-            logger.debug('Discord shard ready');
+            // Shard ready
         });
     }
 
     /**
      * Setup message handler event forwarding
+     * 
+     * Forwards message and command events from the MessageHandler to the bot's
+     * event emitter for other components to consume.
+     * 
+     * @private
      */
     setupMessageHandlerEvents() {
         if (!this.messageHandler) {
@@ -171,21 +230,21 @@ class DiscordBot extends EventEmitter {
 
         // Forward message events from MessageHandler
         this.messageHandler.on('message', (messageData) => {
-            logger.debug(`[DISCORD-BOT] Message event from MessageHandler: ${JSON.stringify(messageData)}`);
             this.emit('message', messageData);
         });
 
         // Forward command events from MessageHandler  
         this.messageHandler.on('command', (commandData) => {
-            logger.debug(`[DISCORD-BOT] Command event from MessageHandler: ${JSON.stringify(commandData)}`);
             this.emit('command', commandData);
         });
-
-        logger.debug('DiscordBot message handler events setup completed');
     }
 
     /**
      * Setup slash command handler event forwarding
+     * 
+     * Forwards interaction events from the SlashCommandHandler.
+     * 
+     * @private
      */
     setupSlashCommandHandlerEvents() {
         if (!this.slashCommandHandler) {
@@ -195,37 +254,31 @@ class DiscordBot extends EventEmitter {
 
         // Forward slash command events
         this.slashCommandHandler.on('slashCommand', (commandData) => {
-            logger.debug(`[DISCORD-BOT] Slash command event: ${JSON.stringify(commandData)}`);
             this.emit('slashCommand', commandData);
-            this.stats.slashCommandsProcessed++;
         });
-
-        logger.debug('DiscordBot slash command handler events setup completed');
     }
 
     /**
      * Initialize all handlers with Discord client
+     * 
+     * Called after Discord client is ready. Initializes message handler,
+     * slash command handler, and command detection handler with the client.
+     * 
+     * @async
+     * @private
      */
     async initializeHandlers() {
         try {
             // Initialize message handler
             if (this.messageHandler) {
                 await this.messageHandler.initialize(this.client);
-                
-                // Set up message handler event forwarding
                 this.setupMessageHandlerEvents();
-                
-                logger.debug('Message handler initialized and events setup');
             }
 
             // Initialize slash command handler
             if (this.slashCommandHandler) {
                 await this.slashCommandHandler.initialize(this.client);
-                
-                // Set up slash command handler event forwarding
                 this.setupSlashCommandHandlerEvents();
-                
-                logger.debug('Slash command handler initialized and events setup');
             }
 
             // Initialize command detection handler
@@ -233,7 +286,6 @@ class DiscordBot extends EventEmitter {
                 await this.commandDetectionHandler.initialize(this.client);
                 this.commandDetectionHandler.registerCommands(this.slashCommandHandler.commands);
             }
-            logger.debug('All Discord bot handlers initialized');
 
         } catch (error) {
             logger.logError(error, 'Failed to initialize Discord bot handlers');
@@ -241,6 +293,13 @@ class DiscordBot extends EventEmitter {
         }
     }
 
+    /**
+     * Set bot presence status
+     * 
+     * Sets the bot's activity and status message visible to Discord users.
+     * 
+     * @private
+     */
     setBotActivity() {
         try {
             const activityConfig = this.config.get('bridge.activity') || {};
@@ -252,7 +311,6 @@ class DiscordBot extends EventEmitter {
                 };
 
                 this.client.user.setActivity(activity.name, { type: activity.type });
-                logger.debug(`Set bot activity: ${activity.name} (${activity.type})`);
             }
 
         } catch (error) {
@@ -260,6 +318,18 @@ class DiscordBot extends EventEmitter {
         }
     }
 
+    // ==================== CONNECTION METHODS ====================
+
+    /**
+     * Connect to Discord
+     * 
+     * Logs in to Discord using the bot token from configuration.
+     * Implements retry logic with exponential backoff.
+     * 
+     * @async
+     * @returns {Promise<void>}
+     * @throws {Error} If connection fails after max attempts
+     */
     async start() {
         try {
             logger.discord('Starting Discord bot...');
@@ -276,11 +346,10 @@ class DiscordBot extends EventEmitter {
 
             logger.discord(`Starting Discord bot (attempt ${this.connectionAttempts}/${this.maxConnectionAttempts})`);
 
-            logger.debug(`Connection attempt ${this.connectionAttempts}/${this.maxConnectionAttempts}`);
-
             // Login to Discord
             await this.client.login(token);
 
+            // Wait for bot to be ready
             await this.waitForReady();
 
             logger.discord('✅ Discord bot started successfully');
@@ -297,6 +366,16 @@ class DiscordBot extends EventEmitter {
         }
     }
 
+    /**
+     * Wait for Discord bot to be fully ready
+     * 
+     * Waits for the bot to be ready with a timeout mechanism.
+     * 
+     * @async
+     * @param {number} timeout - Maximum time to wait in milliseconds (default: 30000)
+     * @returns {Promise<void>}
+     * @throws {Error} If bot doesn't become ready within timeout
+     */
     async waitForReady(timeout = 30000) {
         return new Promise((resolve, reject) => {
             if (this._isReady) {
@@ -330,26 +409,14 @@ class DiscordBot extends EventEmitter {
         });
     }
 
-    async stop() {
-        if (!this._isConnected && !this.client) {
-            logger.debug('Discord bot not connected, nothing to stop');
-            return;
-        }
-
-        const delay = Math.min(5000 * Math.pow(2, this.connectionAttempts - 1), 300000); // Exponential backoff, max 5 minutes
-        
-        logger.discord(`Scheduling reconnection in ${delay / 1000} seconds...`);
-
-        this.reconnectTimeout = setTimeout(async () => {
-            try {
-                this.stats.reconnections++;
-                await this.start();
-            } catch (error) {
-                logger.logError(error, 'Reconnection attempt failed');
-            }
-        }, delay);
-    }
-
+    /**
+     * Disconnect from Discord
+     * 
+     * Gracefully disconnects the Discord bot and cleans up resources.
+     * 
+     * @async
+     * @returns {Promise<void>}
+     */
     async stop() {
         try {
             logger.discord('Stopping Discord bot...');
@@ -387,6 +454,14 @@ class DiscordBot extends EventEmitter {
         }
     }
 
+    /**
+     * Schedule automatic reconnection
+     * 
+     * Schedules a reconnection attempt with exponential backoff.
+     * Only schedules if max attempts hasn't been reached.
+     * 
+     * @private
+     */
     scheduleReconnection() {
         if (this.reconnectTimeout) {
             return; // Reconnection already scheduled
@@ -418,42 +493,57 @@ class DiscordBot extends EventEmitter {
     // ==================== EVENT REGISTRATION METHODS ====================
 
     /**
-     * Register callback for message events
-     * @param {function} callback - Message event callback
+     * Register a message handler callback
+     * 
+     * @param {Function} callback - Message event callback
      */
     onMessage(callback) {
         this.on('message', callback);
-        logger.debug('Message handler registered on DiscordBot');
     }
 
     /**
-     * Register callback for connection events
-     * @param {function} callback - Connection event callback
+     * Register a connection handler callback
+     * 
+     * @param {Function} callback - Connection event callback
      */
     onConnection(callback) {
         this.on('connection', callback);
-        logger.debug('Connection handler registered on DiscordBot');
     }
 
     /**
-     * Register callback for error events
-     * @param {function} callback - Error event callback
+     * Register an error handler callback
+     * 
+     * @param {Function} callback - Error event callback
      */
     onError(callback) {
         this.on('error', callback);
-        logger.debug('Error handler registered on DiscordBot');
     }
 
     // ==================== STATUS METHODS ====================
 
+    /**
+     * Check if bot is connected to Discord
+     * 
+     * @returns {boolean} True if connected and ready
+     */
     isConnected() {
         return this._isConnected && this._isReady;
     }
 
+    /**
+     * Check if bot is fully ready
+     * 
+     * @returns {boolean} True if ready
+     */
     isReady() {
         return this._isReady;
     }
 
+    /**
+     * Get connection status details
+     * 
+     * @returns {object} Connection status object
+     */
     getConnectionStatus() {
         return {
             connected: this._isConnected,
@@ -464,11 +554,13 @@ class DiscordBot extends EventEmitter {
     }
 
     /**
-     * Reload slash commands
+     * Get bot user information
+     * 
+     * @returns {object|null} Bot user info or null if not connected
      */
-    async reloadSlashCommands() {
-        if (!this.slashCommandHandler) {
-            throw new Error('SlashCommandHandler not available');
+    getBotInfo() {
+        if (!this.client?.user) {
+            return null;
         }
 
         return {
@@ -481,8 +573,35 @@ class DiscordBot extends EventEmitter {
         };
     }
 
+    // ==================== UTILITY METHODS ====================
+
+    /**
+     * Get Discord.js client instance
+     * 
+     * Provides access to the raw Discord.js client for advanced usage.
+     * 
+     * @returns {Client|null} Discord.js client or null
+     */
     getClient() {
         return this.client;
+    }
+
+    /**
+     * Reload slash commands
+     * 
+     * Reloads all slash commands from the command directory.
+     * 
+     * @async
+     * @returns {Promise<object>} Bot information after reload
+     * @throws {Error} If slash command handler not available
+     */
+    async reloadSlashCommands() {
+        if (!this.slashCommandHandler) {
+            throw new Error('SlashCommandHandler not available');
+        }
+
+        await this.slashCommandHandler.reloadCommands();
+        return this.getBotInfo();
     }
 }
 
