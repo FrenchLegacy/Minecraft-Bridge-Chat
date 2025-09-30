@@ -1,3 +1,49 @@
+/**
+ * Message Sender - Discord Message Delivery System
+ * 
+ * This file handles sending messages from Minecraft to Discord channels. It manages
+ * message formatting, delivery through webhooks or regular channels, rate limiting,
+ * and provides specialized methods for different message types (guild messages, events,
+ * system messages, connection status).
+ * 
+ * The sender provides:
+ * - Guild chat message delivery to Discord
+ * - Event message delivery (joins, leaves, promotions, etc.)
+ * - System message delivery for bot notifications
+ * - Connection status updates with embeds
+ * - Webhook integration for immersive messaging
+ * - Regular channel fallback when webhooks unavailable
+ * - Rate limiting to prevent Discord API abuse
+ * - Channel validation and caching
+ * - Message formatting through MessageFormatter
+ * - Embed creation through EmbedBuilder
+ * 
+ * Message Types:
+ * - Guild Messages: Regular chat and officer chat from guilds
+ * - Events: Player joins, leaves, promotions, demotes, kicks
+ * - System: Bot notifications and status updates
+ * - Connection Status: Bot connection state changes with rich embeds
+ * 
+ * Delivery Methods:
+ * - Webhook: Messages appear with custom usernames and avatars
+ * - Channel: Standard bot messages with optional embeds
+ * - Automatic fallback from webhook to channel if webhook unavailable
+ * 
+ * Rate Limiting:
+ * - Configurable message limit per time window
+ * - Per-channel rate limiting tracking
+ * - Automatic cleanup of old timestamps
+ * - Protection against Discord API rate limits
+ * 
+ * Channel Routing:
+ * - Chat channel: Regular guild messages, events, connection status
+ * - Staff channel: Officer chat messages, admin notifications
+ * 
+ * @author Fabien83560
+ * @version 1.0.0
+ * @license ISC
+ */
+
 // Globals Imports
 const { EmbedBuilder: DiscordEmbedBuilder } = require('discord.js');
 
@@ -8,7 +54,19 @@ const WebhookSender = require("./WebhookSender.js");
 const EmbedBuilder = require("../../utils/EmbedBuilder.js");
 const logger = require("../../../shared/logger");
 
+/**
+ * MessageSender - Manages message delivery to Discord
+ * 
+ * Handles all outgoing messages from the bridge to Discord, including
+ * formatting, channel routing, rate limiting, and delivery method selection.
+ * 
+ * @class
+ */
 class MessageSender {
+    /**
+     * Create a new MessageSender instance
+     * Initializes configuration, components, and rate limiting system
+     */
     constructor() {
         const mainBridge = BridgeLocator.getInstance();
         this.config = mainBridge.config;
@@ -31,9 +89,15 @@ class MessageSender {
         this.initializeComponents();
     }
 
+    // ==================== INITIALIZATION ====================
+
     /**
      * Initialize components that don't require Discord client
-     * This is called in constructor
+     * 
+     * Sets up message formatter, webhook sender (if enabled), and embed builder.
+     * Called automatically in constructor before Discord client is available.
+     * 
+     * @private
      */
     initializeComponents() {
         try {
@@ -67,8 +131,14 @@ class MessageSender {
 
     /**
      * Initialize with Discord client
-     * This is called after Discord client is ready
+     * 
+     * Completes initialization with Discord client reference, validates channels,
+     * and initializes webhook sender if enabled. Called after Discord client is ready.
+     * 
+     * @async
      * @param {Client} client - Discord client instance
+     * @throws {Error} If client is not provided
+     * @throws {Error} If channel validation fails
      */
     async initialize(client) {
         if (!client) {
@@ -94,6 +164,18 @@ class MessageSender {
         }
     }
 
+    /**
+     * Validate and cache Discord channels
+     * 
+     * Fetches and validates chat and staff channels from Discord using
+     * configured channel IDs. Caches channel references for efficient access.
+     * 
+     * @async
+     * @private
+     * @throws {Error} If client is not available
+     * @throws {Error} If channel configuration is missing
+     * @throws {Error} If channels cannot be fetched
+     */
     async validateAndCacheChannels() {
         if (!this.client) {
             throw new Error('Discord client not available for channel validation');
@@ -140,9 +222,20 @@ class MessageSender {
 
     /**
      * Send guild chat message to Discord
+     * 
+     * Routes guild messages to appropriate Discord channel (chat or staff based on
+     * chat type). Uses webhooks when available, falls back to regular channel sending.
+     * Applies rate limiting and message formatting.
+     * 
+     * @async
      * @param {object} messageData - Parsed guild message data
+     * @param {string} messageData.chatType - Chat type ('guild' or 'officer')
+     * @param {string} messageData.username - Player username
+     * @param {string} messageData.message - Message content
      * @param {object} guildConfig - Guild configuration
-     * @returns {Promise} Send promise
+     * @returns {Promise<Message|null>} Sent Discord message or null if rate limited
+     * @throws {Error} If client is not initialized
+     * @throws {Error} If channel is not available
      */
     async sendGuildMessage(messageData, guildConfig) {
         if (!this.client) {
@@ -198,9 +291,18 @@ class MessageSender {
 
     /**
      * Send event to Discord
+     * 
+     * Sends guild events (joins, leaves, promotions, demotes, kicks) to Discord
+     * chat channel. Formats events using MessageFormatter and applies rate limiting.
+     * 
+     * @async
      * @param {object} eventData - Parsed event data
+     * @param {string} eventData.type - Event type (join, leave, promote, demote, kick)
+     * @param {string} eventData.username - Player username
      * @param {object} guildConfig - Guild configuration
-     * @returns {Promise} Send promise
+     * @returns {Promise<Message|null>} Sent Discord message or null if rate limited
+     * @throws {Error} If client is not initialized
+     * @throws {Error} If chat channel is not available
      */
     async sendEvent(eventData, guildConfig) {
         if (!this.client) {
@@ -246,10 +348,17 @@ class MessageSender {
 
     /**
      * Send system message to Discord
-     * @param {string} type - System message type
+     * 
+     * Sends system notifications (bot status, errors, info) to specified Discord channel.
+     * Used for bridge-level notifications and status updates.
+     * 
+     * @async
+     * @param {string} type - System message type (status, error, info, etc.)
      * @param {object} data - Message data
      * @param {string} channelType - Target channel type ('chat' or 'staff')
-     * @returns {Promise} Send promise
+     * @returns {Promise<Message|null>} Sent Discord message or null if rate limited
+     * @throws {Error} If client is not initialized
+     * @throws {Error} If target channel is not available
      */
     async sendSystemMessage(type, data, channelType = 'chat') {
         if (!this.client) {
@@ -292,10 +401,21 @@ class MessageSender {
 
     /**
      * Send connection status to Discord
-     * @param {string} status - Connection status
+     * 
+     * Sends bot connection status updates with rich embeds showing connection state,
+     * guild information, and additional details. Supports connected, disconnected,
+     * reconnecting, and error states.
+     * 
+     * @async
+     * @param {string} status - Connection status ('connected', 'disconnected', 'reconnecting', 'error')
      * @param {object} guildConfig - Guild configuration
-     * @param {object} details - Additional details
-     * @returns {Promise} Send promise
+     * @param {string} guildConfig.name - Guild name for display
+     * @param {object} details - Additional status details
+     * @param {string} details.reason - Disconnection reason (optional)
+     * @param {string} details.error - Error message (optional)
+     * @returns {Promise<Message>} Sent Discord message with embed
+     * @throws {Error} If client is not initialized
+     * @throws {Error} If chat channel is not available
      */
     async sendConnectionStatus(status, guildConfig, details = {}) {
         if (!this.client) {
@@ -355,10 +475,18 @@ class MessageSender {
 
     /**
      * Send message via webhook
+     * 
+     * Internal method to send messages through webhook system for immersive
+     * messaging with custom usernames and avatars.
+     * 
+     * @async
+     * @private
      * @param {object} messageData - Message data
      * @param {object} guildConfig - Guild configuration
-     * @param {string} channelType - Channel type
-     * @returns {Promise} Send promise
+     * @param {string} channelType - Channel type ('chat' or 'staff')
+     * @returns {Promise<Message>} Sent webhook message
+     * @throws {Error} If webhook sender is not available
+     * @throws {Error} If webhook is not configured for channel
      */
     async sendViaWebhook(messageData, guildConfig, channelType) {
         if (!this.webhookSender) {
@@ -384,10 +512,16 @@ class MessageSender {
 
     /**
      * Send message via channel
+     * 
+     * Internal method to send messages through regular Discord channel as bot.
+     * Supports optional embed attachments.
+     * 
+     * @async
+     * @private
      * @param {string} content - Message content
      * @param {Channel} channel - Discord channel
-     * @param {object} embed - Optional embed
-     * @returns {Promise} Send promise
+     * @param {EmbedBuilder|null} embed - Optional embed object
+     * @returns {Promise<Message>} Sent channel message
      */
     async sendViaChannel(content, channel, embed = null) {
         const options = { content };
@@ -399,12 +533,16 @@ class MessageSender {
         return await channel.send(options);
     }
 
-    // ==================== UTILITY METHODS ====================
+    // ==================== RATE LIMITING ====================
 
     /**
      * Check if channel is rate limited
-     * @param {string} channelId - Channel ID
-     * @returns {boolean} Whether channel is rate limited
+     * 
+     * Determines if the channel has exceeded the configured message rate limit.
+     * Automatically cleans up old timestamps outside the rate limit window.
+     * 
+     * @param {string} channelId - Channel ID to check
+     * @returns {boolean} True if channel is rate limited
      */
     isRateLimited(channelId) {
         if (!this.rateLimit || this.rateLimit.limit <= 0) {
@@ -422,7 +560,11 @@ class MessageSender {
 
     /**
      * Update rate limiting for channel
-     * @param {string} channelId - Channel ID
+     * 
+     * Records the current message timestamp for rate limiting tracking.
+     * Automatically cleans up old timestamps outside the rate limit window.
+     * 
+     * @param {string} channelId - Channel ID to update
      */
     updateRateLimit(channelId) {
         if (!this.rateLimit || this.rateLimit.limit <= 0) {
@@ -441,10 +583,15 @@ class MessageSender {
         this.rateLimiter.set(channelId, validTimes);
     }
 
+    // ==================== UTILITY METHODS ====================
+
     /**
      * Get channel by type
-     * @param {string} channelType - Channel type (chat/staff)
-     * @returns {Channel|null} Discord channel
+     * 
+     * Returns the cached Discord channel reference for the specified type.
+     * 
+     * @param {string} channelType - Channel type ('chat' or 'staff')
+     * @returns {Channel|null} Discord channel or null if not found
      */
     getChannel(channelType) {
         return this.channels[channelType] || null;
@@ -452,6 +599,8 @@ class MessageSender {
 
     /**
      * Clear rate limiter
+     * 
+     * Clears all rate limiting data. Useful for testing or resetting state.
      */
     clearRateLimit() {
         this.rateLimiter.clear();
@@ -460,7 +609,13 @@ class MessageSender {
 
     /**
      * Update configuration
+     * 
+     * Updates sender configuration, particularly message formatter settings
+     * for tag display and source tag visibility.
+     * 
      * @param {object} newConfig - New configuration
+     * @param {boolean} newConfig.showTags - Show guild tags (optional)
+     * @param {boolean} newConfig.showSourceTag - Show source tag (optional)
      */
     updateConfig(newConfig) {
         // Update message formatter config
@@ -476,8 +631,13 @@ class MessageSender {
         logger.debug('Discord MessageSender configuration updated');
     }
 
+    // ==================== CLEANUP ====================
+
     /**
      * Cleanup resources
+     * 
+     * Clears rate limiter, cleans up webhook sender, and releases channel references.
+     * Should be called before disposing of the sender instance.
      */
     cleanup() {
         this.rateLimiter.clear();
