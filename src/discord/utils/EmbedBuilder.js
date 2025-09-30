@@ -1,3 +1,35 @@
+/**
+ * Discord Embed Builder - Rich Embed Creation for Guild Messages and Events
+ * 
+ * This utility class provides a centralized system for creating rich Discord embeds
+ * for all types of guild-related content. It handles formatting, styling, and
+ * presentation of messages, events, system notifications, and connection status
+ * updates sent to Discord channels.
+ * 
+ * The EmbedBuilder provides:
+ * - Consistent embed styling across all guild messages and events
+ * - Dynamic color and emoji configuration from templates
+ * - Specialized embed creation for different content types
+ * - Guild branding with icons and footer information
+ * - Automatic timestamp and formatting
+ * - Rich field layouts for complex data presentation
+ * - Error and system notification formatting
+ * 
+ * Embed types supported:
+ * - Guild messages: Regular guild chat and officer chat
+ * - Guild events: Join, leave, kick, promote, demote, level, MOTD, invite, online
+ * - Connection status: Connected, disconnected, reconnected
+ * - System messages: Errors, warnings, success, general system notifications
+ * - Info/Error embeds: Generic information and error displays
+ * 
+ * Configuration is loaded from templates.json defaults section for colors and emojis,
+ * allowing easy customization without code changes.
+ * 
+ * @author Fabien83560
+ * @version 1.0.0
+ * @license ISC
+ */
+
 // Globals Imports
 const { EmbedBuilder: DiscordEmbedBuilder } = require('discord.js');
 
@@ -6,7 +38,39 @@ const BridgeLocator = require("../../bridgeLocator.js");
 const { getTemplateLoader } = require("../../config/TemplateLoader.js");
 const logger = require("../../shared/logger");
 
+/**
+ * EmbedBuilder - Create rich Discord embeds for guild content
+ * 
+ * Utility class that creates formatted Discord embeds with consistent styling,
+ * colors, and emojis for all types of guild-related content including messages,
+ * events, and system notifications.
+ * 
+ * @class
+ */
 class EmbedBuilder {
+    /**
+     * Create a new EmbedBuilder instance
+     * 
+     * Initializes the embed builder by loading configuration and template defaults
+     * for colors and emojis. These defaults can be customized in templates.json
+     * without modifying code.
+     * 
+     * Default color scheme:
+     * - guild: Blue (3447003)
+     * - officer: Orange (15844367)
+     * - event: Green (3066993)
+     * - system: Gray (9807270)
+     * - error: Red (15158332)
+     * - success: Green (3066993)
+     * - warning: Orange (15844367)
+     * 
+     * Default emojis:
+     * - guild: 💬, officer: 🛡️
+     * - join/leave: 👋, kick: 🚫
+     * - promote: ⬆️, demote: ⬇️
+     * - level: 🎉, motd: 📝
+     * - system: ⚙️, error: ❌, success: ✅, warning: ⚠️
+     */
     constructor() {
         const mainBridge = BridgeLocator.getInstance();
         this.config = mainBridge.config;
@@ -45,9 +109,31 @@ class EmbedBuilder {
 
     /**
      * Create guild message embed
-     * @param {object} messageData - Message data
-     * @param {object} guildConfig - Guild configuration
-     * @returns {EmbedBuilder} Discord embed
+     * 
+     * Creates a rich embed for guild chat messages (regular guild chat or officer chat).
+     * Automatically styles the embed with appropriate colors and emojis based on chat type.
+     * Includes username, message content, guild branding, and optional rank display.
+     * 
+     * @param {object} messageData - Parsed message data from Minecraft
+     * @param {string} messageData.username - Username of the message sender
+     * @param {string} messageData.message - Message content
+     * @param {string} [messageData.chatType='guild'] - Chat type ('guild' or 'officer')
+     * @param {string} [messageData.rank] - Player's guild rank (optional)
+     * @param {object} guildConfig - Guild configuration object
+     * @param {string} guildConfig.name - Guild name
+     * @param {string} guildConfig.tag - Guild tag
+     * @param {object} guildConfig.account - Bot account info for icon
+     * @returns {DiscordEmbedBuilder} Formatted Discord embed ready to send
+     * 
+     * @example
+     * const messageData = {
+     *   username: "Player123",
+     *   message: "Hello guild!",
+     *   chatType: "guild",
+     *   rank: "Member"
+     * };
+     * const embed = embedBuilder.createGuildMessageEmbed(messageData, guildConfig);
+     * await channel.send({ embeds: [embed] });
      */
     createGuildMessageEmbed(messageData, guildConfig) {
         const embed = new DiscordEmbedBuilder();
@@ -80,9 +166,30 @@ class EmbedBuilder {
 
     /**
      * Create guild event embed
-     * @param {object} eventData - Event data
-     * @param {object} guildConfig - Guild configuration
-     * @returns {EmbedBuilder} Discord embed
+     * 
+     * Creates a rich embed for guild events (join, leave, kick, promote, demote, etc.).
+     * Automatically formats the embed based on event type with appropriate styling,
+     * emojis, and field layout. Delegates field creation to addEventFields().
+     * 
+     * @param {object} eventData - Parsed event data from Minecraft
+     * @param {string} eventData.type - Event type (join, leave, kick, promote, demote, level, motd, invite, online)
+     * @param {string} [eventData.username] - Username involved in event (if applicable)
+     * @param {string} [eventData.fromRank] - Previous rank (for promote/demote)
+     * @param {string} [eventData.toRank] - New rank (for promote/demote)
+     * @param {object} guildConfig - Guild configuration object
+     * @param {string} guildConfig.name - Guild name
+     * @param {string} guildConfig.tag - Guild tag
+     * @returns {DiscordEmbedBuilder} Formatted Discord embed ready to send
+     * 
+     * @example
+     * const eventData = {
+     *   type: "promote",
+     *   username: "Player123",
+     *   fromRank: "Member",
+     *   toRank: "Officer",
+     *   promoter: "GuildLeader"
+     * };
+     * const embed = embedBuilder.createGuildEventEmbed(eventData, guildConfig);
      */
     createGuildEventEmbed(eventData, guildConfig) {
         const embed = new DiscordEmbedBuilder();
@@ -108,8 +215,30 @@ class EmbedBuilder {
 
     /**
      * Add event-specific fields to embed
-     * @param {EmbedBuilder} embed - Discord embed builder
-     * @param {object} eventData - Event data
+     * 
+     * Internal method that adds appropriate fields and descriptions to an embed
+     * based on the event type. Handles all supported guild events with proper
+     * formatting and field layout.
+     * 
+     * Supported events:
+     * - join/welcome: Player joining guild
+     * - leave: Player leaving guild
+     * - kick: Player kicked from guild
+     * - promote: Player promoted with rank change
+     * - demote: Player demoted with rank change
+     * - level: Guild level up
+     * - motd: MOTD changed
+     * - invite: Player invited or invitation accepted
+     * - online: Online member count and list
+     * 
+     * @private
+     * @param {DiscordEmbedBuilder} embed - Discord embed builder to modify
+     * @param {object} eventData - Event data containing type-specific information
+     * @param {string} eventData.type - Event type identifier
+     * 
+     * @example
+     * // Internal usage only
+     * this.addEventFields(embed, { type: 'promote', username: 'Player', toRank: 'Officer' });
      */
     addEventFields(embed, eventData) {
         const eventType = eventData.type;
@@ -259,10 +388,32 @@ class EmbedBuilder {
 
     /**
      * Create connection status embed
-     * @param {object} guildConfig - Guild configuration
-     * @param {string} status - Connection status
-     * @param {object} details - Additional details
-     * @returns {EmbedBuilder} Discord embed
+     * 
+     * Creates a rich embed displaying bot connection status changes for a guild.
+     * Shows connection/disconnection/reconnection events with appropriate styling,
+     * guild information, and optional connection details.
+     * 
+     * @param {object} guildConfig - Guild configuration object
+     * @param {string} guildConfig.name - Guild name
+     * @param {string} guildConfig.tag - Guild tag
+     * @param {object} guildConfig.server - Server information
+     * @param {string} guildConfig.server.serverName - Server name (e.g., 'Hypixel')
+     * @param {object} guildConfig.account - Bot account information
+     * @param {string} guildConfig.account.username - Bot username
+     * @param {string} status - Connection status ('connected', 'disconnected', 'reconnected', or custom)
+     * @param {object} [details={}] - Additional connection details
+     * @param {string} [details.connectionTime] - Time of connection
+     * @param {number} [details.attempt] - Connection attempt number
+     * @param {string} [details.reason] - Reason for status change
+     * @returns {DiscordEmbedBuilder} Formatted Discord embed ready to send
+     * 
+     * @example
+     * const embed = embedBuilder.createConnectionEmbed(
+     *   guildConfig,
+     *   'connected',
+     *   { connectionTime: '2:30 PM', attempt: 1 }
+     * );
+     * await statusChannel.send({ embeds: [embed] });
      */
     createConnectionEmbed(guildConfig, status, details = {}) {
         const embed = new DiscordEmbedBuilder();
@@ -352,10 +503,28 @@ class EmbedBuilder {
 
     /**
      * Create system message embed
-     * @param {string} type - System message type
+     * 
+     * Creates a rich embed for system messages and notifications. Automatically
+     * styles the embed based on message type (error, warning, success, or general).
+     * Useful for internal system notifications and status updates.
+     * 
+     * @param {string} type - System message type (should include 'error', 'warning', 'success' for auto-styling)
      * @param {object} data - System message data
-     * @param {object} guildConfig - Guild configuration
-     * @returns {EmbedBuilder} Discord embed
+     * @param {string} data.message - Main message content
+     * @param {string} [data.context] - Additional context information
+     * @param {object|string} [data.details] - Detailed information (will be JSON stringified if object)
+     * @param {object} guildConfig - Guild configuration object
+     * @param {string} guildConfig.name - Guild name
+     * @param {string} guildConfig.tag - Guild tag
+     * @returns {DiscordEmbedBuilder} Formatted Discord embed ready to send
+     * 
+     * @example
+     * const data = {
+     *   message: "Command queue full",
+     *   context: "Rate limiting active",
+     *   details: { queueSize: 100, maxSize: 100 }
+     * };
+     * const embed = embedBuilder.createSystemEmbed('warning', data, guildConfig);
      */
     createSystemEmbed(type, data, guildConfig) {
         const embed = new DiscordEmbedBuilder();
@@ -402,8 +571,17 @@ class EmbedBuilder {
 
     /**
      * Format event type for display
-     * @param {string} eventType - Event type
-     * @returns {string} Formatted event type
+     * 
+     * Converts underscore-separated event type strings to human-readable
+     * title case format. For example: 'guild_member_join' → 'Guild Member Join'
+     * 
+     * @param {string} eventType - Raw event type string
+     * @returns {string} Formatted event type in title case
+     * 
+     * @example
+     * formatEventType('guild_member_join'); // "Guild Member Join"
+     * formatEventType('promote'); // "Promote"
+     * formatEventType('motd_change'); // "Motd Change"
      */
     formatEventType(eventType) {
         return eventType
@@ -414,8 +592,19 @@ class EmbedBuilder {
 
     /**
      * Get guild icon URL
-     * @param {object} guildConfig - Guild configuration
-     * @returns {string} Guild icon URL
+     * 
+     * Generates a Minecraft player head icon URL using the bot's username.
+     * Uses the Minotar service to fetch rendered Minecraft head images.
+     * This provides visual branding for each guild based on their bot account.
+     * 
+     * @param {object} guildConfig - Guild configuration object
+     * @param {object} guildConfig.account - Bot account information
+     * @param {string} guildConfig.account.username - Bot's Minecraft username
+     * @returns {string} URL to 64x64 Minecraft head icon
+     * 
+     * @example
+     * const iconUrl = embedBuilder.getGuildIcon(guildConfig);
+     * // Returns: "https://minotar.net/helm/BotUsername/64.png"
      */
     getGuildIcon(guildConfig) {
         // Use Minecraft head as guild icon
@@ -425,10 +614,30 @@ class EmbedBuilder {
 
     /**
      * Create info embed
+     * 
+     * Creates a simple informational embed with custom title, description, and color.
+     * Useful for general purpose notifications and information displays.
+     * 
      * @param {string} title - Embed title
-     * @param {string} description - Embed description
-     * @param {string} color - Color name or hex
-     * @returns {EmbedBuilder} Discord embed
+     * @param {string} description - Embed description/content
+     * @param {string|number} [color='system'] - Color name from this.colors or hex color code
+     * @returns {DiscordEmbedBuilder} Formatted Discord embed ready to send
+     * 
+     * @example
+     * // Using color name
+     * const embed = embedBuilder.createInfoEmbed(
+     *   "Maintenance Notice",
+     *   "Bot will restart in 5 minutes",
+     *   "warning"
+     * );
+     * 
+     * @example
+     * // Using hex color
+     * const embed = embedBuilder.createInfoEmbed(
+     *   "Custom Info",
+     *   "This is a custom message",
+     *   0x00FF00
+     * );
      */
     createInfoEmbed(title, description, color = 'system') {
         const embedColor = typeof color === 'string' ? (this.colors[color] || this.colors.system) : color;
@@ -442,9 +651,24 @@ class EmbedBuilder {
 
     /**
      * Create error embed
-     * @param {string} error - Error message
-     * @param {string} context - Error context
-     * @returns {EmbedBuilder} Discord embed
+     * 
+     * Creates a standardized error embed with red color and error emoji.
+     * Optionally includes context information for debugging.
+     * 
+     * @param {string} error - Error message to display
+     * @param {string} [context=null] - Additional context about the error
+     * @returns {DiscordEmbedBuilder} Formatted error embed ready to send
+     * 
+     * @example
+     * const embed = embedBuilder.createErrorEmbed(
+     *   "Failed to connect to Minecraft server",
+     *   "Connection timeout after 30 seconds"
+     * );
+     * await channel.send({ embeds: [embed] });
+     * 
+     * @example
+     * // Without context
+     * const embed = embedBuilder.createErrorEmbed("Invalid command");
      */
     createErrorEmbed(error, context = null) {
         const embed = new DiscordEmbedBuilder()
@@ -466,7 +690,25 @@ class EmbedBuilder {
 
     /**
      * Update colors configuration
-     * @param {object} newColors - New colors configuration
+     * 
+     * Dynamically updates the color configuration for embeds. Merges new colors
+     * with existing ones, allowing partial updates without replacing all colors.
+     * Useful for runtime theme customization.
+     * 
+     * @param {object} newColors - New color configuration to merge
+     * @param {number} [newColors.guild] - Guild chat color
+     * @param {number} [newColors.officer] - Officer chat color
+     * @param {number} [newColors.event] - Event color
+     * @param {number} [newColors.system] - System message color
+     * @param {number} [newColors.error] - Error color
+     * @param {number} [newColors.success] - Success color
+     * @param {number} [newColors.warning] - Warning color
+     * 
+     * @example
+     * embedBuilder.updateColors({
+     *   guild: 0x0099FF,
+     *   officer: 0xFF9900
+     * });
      */
     updateColors(newColors) {
         this.colors = { ...this.colors, ...newColors };
@@ -475,7 +717,25 @@ class EmbedBuilder {
 
     /**
      * Update emojis configuration
-     * @param {object} newEmojis - New emojis configuration
+     * 
+     * Dynamically updates the emoji configuration for embeds. Merges new emojis
+     * with existing ones, allowing partial updates without replacing all emojis.
+     * Useful for runtime customization with custom Discord emojis.
+     * 
+     * @param {object} newEmojis - New emoji configuration to merge
+     * @param {string} [newEmojis.guild] - Guild chat emoji
+     * @param {string} [newEmojis.officer] - Officer chat emoji
+     * @param {string} [newEmojis.join] - Join event emoji
+     * @param {string} [newEmojis.leave] - Leave event emoji
+     * @param {string} [newEmojis.kick] - Kick event emoji
+     * @param {string} [newEmojis.promote] - Promote event emoji
+     * @param {string} [newEmojis.demote] - Demote event emoji
+     * 
+     * @example
+     * embedBuilder.updateEmojis({
+     *   guild: '<:guild:123456789>',
+     *   officer: '<:officer:987654321>'
+     * });
      */
     updateEmojis(newEmojis) {
         this.emojis = { ...this.emojis, ...newEmojis };
