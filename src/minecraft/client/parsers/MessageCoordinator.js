@@ -1,10 +1,72 @@
+/**
+ * Message Coordinator - Central Message Processing and Routing
+ * 
+ * This file coordinates the parsing and processing of Minecraft messages that have
+ * been pre-filtered by server strategies. It serves as the central routing point
+ * between raw Minecraft messages and their parsed, structured representations.
+ * 
+ * Key responsibilities:
+ * - Message parsing coordination between ChatParser and EventParser
+ * - Multi-layered infinite loop prevention (defense in depth)
+ * - Inter-guild relay pattern detection and filtering
+ * - Message categorization (message, event, ignored, unknown)
+ * - Chat type detection (guild chat, officer chat)
+ * - Message relevance determination for bridging
+ * - Specialized processing methods for different message types
+ * 
+ * The coordinator implements a layered filtering approach:
+ * 1. Strategy-level filtering (HypixelStrategy.isOwnBotMessage)
+ * 2. Coordinator-level filtering (isOwnBotMessage)
+ * 3. Inter-guild relay pattern detection (isInterGuildRelayMessage)
+ * 
+ * This multi-layered approach ensures maximum protection against infinite loops
+ * when bots relay messages between guilds.
+ * 
+ * Processing flow:
+ * 1. Receive pre-filtered guild message from strategy
+ * 2. Attempt event parsing (events are more specific)
+ * 3. If not event, attempt chat parsing
+ * 4. Apply additional filtering (own bot, relay patterns)
+ * 5. Return categorized result with parsed data
+ * 
+ * Message categories:
+ * - 'message': Guild chat messages (including officer chat)
+ * - 'event': Guild events (joins, leaves, promotions, etc.)
+ * - 'ignored': Filtered messages (own bot, relay patterns)
+ * - 'unknown': Unparseable messages
+ * 
+ * @author Fabien83560
+ * @version 1.0.0
+ * @license ISC
+ */
+
 // Specific Imports
 const BridgeLocator = require("../../../bridgeLocator.js");
 const ChatParser = require("./ChatParser.js");
 const EventParser = require("./EventParser.js");
 const logger = require("../../../shared/logger");
 
+/**
+ * MessageCoordinator - Coordinates message parsing and filtering
+ * 
+ * Central coordinator for processing guild messages, routing between parsers,
+ * and applying multiple layers of filtering to prevent infinite loops.
+ * 
+ * @class
+ */
 class MessageCoordinator {
+    /**
+     * Initialize the message coordinator
+     * 
+     * Sets up:
+     * - Configuration from main bridge
+     * - ChatParser instance for message parsing
+     * - EventParser instance for event parsing
+     * 
+     * @example
+     * const coordinator = new MessageCoordinator();
+     * const result = coordinator.processMessage(message, guildConfig);
+     */
     constructor() {
         const mainBridge = BridgeLocator.getInstance();
         this.config = mainBridge.config;
@@ -15,9 +77,48 @@ class MessageCoordinator {
 
     /**
      * Process a guild message (pre-filtered by strategy)
+     * 
+     * Main entry point for message processing. Routes message through appropriate
+     * parser and applies additional filtering layers.
+     * 
+     * Processing priority:
+     * 1. Event parsing (more specific patterns)
+     * 2. Chat parsing (guild and officer chat)
+     * 3. Additional filtering (own bot, relay patterns)
+     * 4. Categorization and return
+     * 
+     * Return object structure:
+     * {
+     *   category: 'message' | 'event' | 'ignored' | 'unknown',
+     *   data: {
+     *     type: string,          // Specific message type
+     *     username: string,      // Username if applicable
+     *     message: string,       // Message content if applicable
+     *     chatType: string,      // 'guild' or 'officer' for messages
+     *     ...                    // Additional type-specific data
+     *   }
+     * }
+     * 
      * @param {string|object} rawMessage - Raw message from Minecraft client
      * @param {object} guildConfig - Guild configuration
-     * @returns {object} Processing result with category and data
+     * @param {string} guildConfig.name - Guild name
+     * @param {object} guildConfig.account - Account configuration
+     * @param {string} guildConfig.account.username - Bot username
+     * @returns {object} Processing result with category and parsed data
+     * 
+     * @example
+     * const result = coordinator.processMessage(
+     *   "Guild > [MVP+] Player: Hello!",
+     *   guildConfig
+     * );
+     * // Returns: { category: 'message', data: { type: 'guild_chat', ... } }
+     * 
+     * @example
+     * const result = coordinator.processMessage(
+     *   "Guild > Player joined.",
+     *   guildConfig
+     * );
+     * // Returns: { category: 'event', data: { type: 'join', ... } }
      */
     processMessage(rawMessage, guildConfig) {
         const messageText = typeof rawMessage === 'string' ? rawMessage : rawMessage.toString();
@@ -100,9 +201,29 @@ class MessageCoordinator {
 
     /**
      * Check if parsed chat data represents our own bot message
-     * @param {object} chatData - Parsed chat data
+     * 
+     * CRITICAL: Second layer of defense against infinite loops.
+     * Performs case-insensitive username comparison between message sender
+     * and bot username from configuration.
+     * 
+     * This check happens AFTER strategy-level filtering, providing
+     * additional protection if strategy filtering fails.
+     * 
+     * @param {object} chatData - Parsed chat data from ChatParser
+     * @param {string} chatData.username - Message sender username
+     * @param {string} [chatData.message] - Message content
+     * @param {string} [chatData.chatType] - Chat type (guild or officer)
      * @param {object} guildConfig - Guild configuration
+     * @param {object} guildConfig.account - Account configuration
+     * @param {string} guildConfig.account.username - Bot username
      * @returns {boolean} Whether this is our own bot message
+     * 
+     * @example
+     * const chatData = { username: 'MyBot', message: 'Hello' };
+     * const isOwn = coordinator.isOwnBotMessage(chatData, {
+     *   account: { username: 'MyBot' }
+     * });
+     * // Returns: true
      */
     isOwnBotMessage(chatData, guildConfig) {
         if (!chatData.username || !guildConfig.account.username) {
@@ -123,10 +244,49 @@ class MessageCoordinator {
     }
 
     /**
-     * Check if message appears to be an inter-guild relay (with officer chat support)
-     * @param {object} chatData - Parsed chat data
+     * Check if message appears to be an inter-guild relay
+     * 
+     * CRITICAL: Third layer of defense against infinite loops.
+     * Detects various patterns that indicate a message is being relayed
+     * between guilds, which could cause infinite relay loops.
+     * 
+     * Detection patterns:
+     * 1. Bot relaying format: "OtherUser: actual message"
+     * 2. Username chains: "User1: User1: message"
+     * 3. Multi-user relay: "User1: User2: User3: message"
+     * 4. Guild tag patterns: "[TAG] User: message"
+     * 5. Bot echo: Bot mentioning itself in message
+     * 6. Officer-specific relay patterns
+     * 
+     * Supports both guild and officer chat detection through chatType parameter.
+     * 
+     * @param {object} chatData - Parsed chat data from ChatParser
+     * @param {string} chatData.message - Message content to analyze
+     * @param {string} chatData.username - Message sender username
+     * @param {string} [chatData.chatType] - Chat type ('guild' or 'officer')
      * @param {object} guildConfig - Guild configuration
-     * @returns {boolean} Whether this appears to be an inter-guild relay message
+     * @param {object} guildConfig.account - Account configuration
+     * @param {string} guildConfig.account.username - Bot username
+     * @param {string} guildConfig.name - Guild name for logging
+     * @returns {boolean} Whether message appears to be an inter-guild relay
+     * 
+     * @example
+     * const chatData = {
+     *   username: 'MyBot',
+     *   message: 'OtherUser: Hello from another guild',
+     *   chatType: 'guild'
+     * };
+     * const isRelay = coordinator.isInterGuildRelayMessage(chatData, guildConfig);
+     * // Returns: true (detected Pattern 1)
+     * 
+     * @example
+     * const chatData = {
+     *   username: 'Player',
+     *   message: 'Hello everyone!',
+     *   chatType: 'guild'
+     * };
+     * const isRelay = coordinator.isInterGuildRelayMessage(chatData, guildConfig);
+     * // Returns: false (no relay pattern detected)
      */
     isInterGuildRelayMessage(chatData, guildConfig) {
         if (!chatData.message || !chatData.username) {
@@ -213,10 +373,24 @@ class MessageCoordinator {
     }
 
     /**
-     * Check if message is relevant for bridging (should always be true since pre-filtered)
+     * Check if message is relevant for bridging
+     * 
+     * Determines if a processed message should be forwarded to bridge systems
+     * (Discord, web, etc.). Messages are relevant if they are categorized as
+     * 'message' (guild/officer chat) or 'event' (guild events).
+     * 
+     * Note: Messages reaching this method have already been filtered by strategy,
+     * so they should always be guild-related.
+     * 
      * @param {string|object} rawMessage - Raw message from Minecraft
      * @param {object} guildConfig - Guild configuration
      * @returns {boolean} Whether message is relevant for bridging
+     * 
+     * @example
+     * const isRelevant = coordinator.isRelevantForBridge(message, guildConfig);
+     * if (isRelevant) {
+     *   sendToDiscord(message);
+     * }
      */
     isRelevantForBridge(rawMessage, guildConfig) {
         const result = this.processMessage(rawMessage, guildConfig);
@@ -234,9 +408,23 @@ class MessageCoordinator {
 
     /**
      * Process guild chat message specifically (including officer chat)
+     * 
+     * Specialized method for processing only guild/officer chat messages.
+     * Returns null if message is not guild chat or is filtered.
+     * 
+     * Applies same filtering as processMessage:
+     * - Own bot message filtering
+     * - Inter-guild relay pattern detection
+     * 
      * @param {string|object} rawMessage - Raw message from Minecraft
      * @param {object} guildConfig - Guild configuration
-     * @returns {object|null} Parsed chat message or null
+     * @returns {object|null} Parsed chat message or null if not guild chat
+     * 
+     * @example
+     * const chatData = coordinator.processGuildChatMessage(message, guildConfig);
+     * if (chatData) {
+     *   console.log(`${chatData.username}: ${chatData.message}`);
+     * }
      */
     processGuildChatMessage(rawMessage, guildConfig) {
         logger.bridge(`[GUILD] [${guildConfig.name}] Processing specifically as guild chat message`);
@@ -260,9 +448,23 @@ class MessageCoordinator {
 
     /**
      * Process officer chat message specifically
+     * 
+     * Specialized method for processing only officer chat messages.
+     * Returns null if message is not officer chat or is filtered.
+     * 
+     * Applies same filtering as processMessage:
+     * - Own bot message filtering
+     * - Inter-guild relay pattern detection (officer-specific patterns)
+     * 
      * @param {string|object} rawMessage - Raw message from Minecraft
      * @param {object} guildConfig - Guild configuration
-     * @returns {object|null} Parsed officer message or null
+     * @returns {object|null} Parsed officer message or null if not officer chat
+     * 
+     * @example
+     * const officerData = coordinator.processOfficerChatMessage(message, guildConfig);
+     * if (officerData) {
+     *   console.log(`[OFFICER] ${officerData.username}: ${officerData.message}`);
+     * }
      */
     processOfficerChatMessage(rawMessage, guildConfig) {
         logger.bridge(`[OFFICER] [${guildConfig.name}] Processing specifically as officer chat message`);
@@ -285,9 +487,26 @@ class MessageCoordinator {
 
     /**
      * Process guild event specifically
+     * 
+     * Specialized method for processing only guild events.
+     * Returns null if message is not a successfully parsed event.
+     * 
+     * Events include:
+     * - Member joins and leaves
+     * - Promotions and demotions
+     * - Kicks and invites
+     * - Guild level changes
+     * - MOTD updates
+     * 
      * @param {string|object} rawMessage - Raw message from Minecraft
      * @param {object} guildConfig - Guild configuration
-     * @returns {object|null} Parsed event or null
+     * @returns {object|null} Parsed event or null if not an event
+     * 
+     * @example
+     * const eventData = coordinator.processGuildEvent(message, guildConfig);
+     * if (eventData) {
+     *   console.log(`Event: ${eventData.type} - ${eventData.username}`);
+     * }
      */
     processGuildEvent(rawMessage, guildConfig) {
         logger.bridge(`[GUILD] [${guildConfig.name}] Processing specifically as guild event`);
@@ -304,9 +523,17 @@ class MessageCoordinator {
 
     /**
      * Check if message is specifically officer chat
+     * 
+     * Quick check method for officer chat detection without full processing.
+     * 
      * @param {string|object} rawMessage - Raw message from Minecraft
      * @param {object} guildConfig - Guild configuration
      * @returns {boolean} Whether message is officer chat
+     * 
+     * @example
+     * if (coordinator.isOfficerChatMessage(message, guildConfig)) {
+     *   console.log('Officer chat detected');
+     * }
      */
     isOfficerChatMessage(rawMessage, guildConfig) {
         const chatData = this.chatParser.parseMessage(rawMessage, guildConfig);
@@ -315,9 +542,18 @@ class MessageCoordinator {
 
     /**
      * Check if message is guild chat (including officer chat)
+     * 
+     * Quick check method for guild chat detection without full processing.
+     * Returns true for both regular guild chat and officer chat.
+     * 
      * @param {string|object} rawMessage - Raw message from Minecraft
      * @param {object} guildConfig - Guild configuration
-     * @returns {boolean} Whether message is guild chat
+     * @returns {boolean} Whether message is guild chat (including officer)
+     * 
+     * @example
+     * if (coordinator.isGuildChatMessage(message, guildConfig)) {
+     *   console.log('Guild chat detected');
+     * }
      */
     isGuildChatMessage(rawMessage, guildConfig) {
         const chatData = this.chatParser.parseMessage(rawMessage, guildConfig);

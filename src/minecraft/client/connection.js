@@ -1,3 +1,36 @@
+/**
+ * Minecraft Connection Manager - Bot Connection Lifecycle Management
+ * 
+ * This file manages the complete lifecycle of Minecraft bot connections, including
+ * connection establishment, authentication, reconnection handling, message processing,
+ * and disconnection. It serves as the core interface between the bot management system
+ * and the Mineflayer library.
+ * 
+ * Key features:
+ * - Connection establishment with retry logic and exponential backoff
+ * - Microsoft authentication with visual code display
+ * - Session caching for faster reconnections
+ * - Automatic reconnection with strategy-based post-connection handling
+ * - Guild message filtering and routing
+ * - Health monitoring and automatic respawn
+ * - Connection status tracking and reporting
+ * - Message sending (guild chat, officer chat, commands)
+ * 
+ * The connection manager integrates with StrategyManager to apply server-specific
+ * behaviors (like Hypixel's limbo system) after connection and reconnection events.
+ * 
+ * Connection flow:
+ * 1. Create bot with authentication
+ * 2. Wait for spawn event
+ * 3. Apply post-connection strategy
+ * 4. Setup event handlers
+ * 5. Monitor health and messages
+ * 
+ * @author Fabien83560
+ * @version 1.0.0
+ * @license ISC
+ */
+
 // Globals Imports
 const mineflayer = require('mineflayer');
 
@@ -5,7 +38,41 @@ const mineflayer = require('mineflayer');
 const logger = require("../../shared/logger");
 const StrategyManager = require("../servers/StrategyManager.js")
 
+/**
+ * MinecraftConnection - Manages individual bot connections
+ * 
+ * Handles all aspects of a single bot's connection to a Minecraft server,
+ * including authentication, reconnection, message handling, and health monitoring.
+ * 
+ * @class
+ */
 class MinecraftConnection {
+    /**
+     * Initialize a new Minecraft connection for a guild
+     * 
+     * Sets up connection tracking, retry configuration, and strategy management.
+     * Does not automatically connect - call connect() to establish connection.
+     * 
+     * @param {object} guildConfig - Guild configuration object
+     * @param {string} guildConfig.id - Guild ID
+     * @param {string} guildConfig.name - Guild name
+     * @param {string} guildConfig.tag - Guild tag
+     * @param {object} guildConfig.account - Account configuration
+     * @param {string} guildConfig.account.username - Minecraft username
+     * @param {string} guildConfig.account.authMethod - Authentication method
+     * @param {object} guildConfig.server - Server configuration
+     * @param {string} guildConfig.server.host - Server host
+     * @param {number} guildConfig.server.port - Server port
+     * @param {string} guildConfig.server.version - Minecraft version
+     * 
+     * @example
+     * const connection = new MinecraftConnection({
+     *   id: 'guild1',
+     *   name: 'MyGuild',
+     *   account: { username: 'BotName', authMethod: 'microsoft' },
+     *   server: { host: 'mc.hypixel.net', port: 25565 }
+     * });
+     */
     constructor(guildConfig) {
         this._guildConfig = guildConfig;
 
@@ -25,6 +92,26 @@ class MinecraftConnection {
         this.eventCallback = null;
     }
 
+    /**
+     * Establish connection to Minecraft server
+     * 
+     * Creates bot instance, waits for spawn, and applies post-connection strategy.
+     * Implements retry logic with connection attempt tracking.
+     * 
+     * Process:
+     * 1. Check if already connecting
+     * 2. Create bot instance with authentication
+     * 3. Wait for successful spawn (240s timeout)
+     * 4. Apply server-specific post-connection strategy
+     * 5. Reset retry counter on success
+     * 
+     * @returns {Promise<void>}
+     * @throws {Error} If connection fails after max attempts or spawn timeout
+     * 
+     * @example
+     * await connection.connect();
+     * console.log('Bot connected successfully');
+     */
     async connect() {
         if(this._isConnecting) {
             logger.warn(`Connection already in progress for ${this._guildConfig.name}`);
@@ -97,6 +184,27 @@ class MinecraftConnection {
         }
     }
 
+    /**
+     * Create Mineflayer bot instance with authentication
+     * 
+     * Configures and creates bot with Microsoft authentication support,
+     * session caching, and connection parameters from guild configuration.
+     * Displays authentication code for Microsoft accounts.
+     * 
+     * Bot configuration includes:
+     * - Authentication (Microsoft/offline)
+     * - Session caching paths
+     * - Server connection details
+     * - View distance and chat limits
+     * - Keep-alive settings
+     * 
+     * @returns {Promise<void>}
+     * @throws {Error} If bot creation fails
+     * 
+     * @example
+     * await connection.createBot();
+     * // Bot instance created and stored in this._bot
+     */
     async createBot() {
         // Prepare bot configuration
         const botConfig = {
@@ -198,6 +306,19 @@ class MinecraftConnection {
         }
     }
 
+    /**
+     * Wait for bot to spawn in the Minecraft world
+     * 
+     * Waits for the 'spawn' event with a 240-second timeout.
+     * Handles errors, disconnections, and kicks during spawn.
+     * 
+     * @returns {Promise<void>}
+     * @throws {Error} If spawn timeout, error, disconnect, or kick occurs
+     * 
+     * @example
+     * await connection.waitForSpawn();
+     * console.log('Bot spawned successfully');
+     */
     async waitForSpawn() {
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
@@ -227,6 +348,18 @@ class MinecraftConnection {
         });
     }
 
+    /**
+     * Apply server-specific post-connection strategy
+     * 
+     * Executes server-specific behavior after successful connection.
+     * For Hypixel: changes language and goes to limbo.
+     * Non-critical operation - connection remains valid even if strategy fails.
+     * 
+     * @returns {Promise<void>}
+     * 
+     * @example
+     * await connection.applyPostConnectStrategy();
+     */
     async applyPostConnectStrategy() {
         const serverName = this._guildConfig.server.serverName;
         logger.minecraft(`Applying ${serverName} post-connection strategy for ${this._guildConfig.name}`);
@@ -240,6 +373,23 @@ class MinecraftConnection {
         }
     }
 
+    /**
+     * Reconnect to Minecraft server
+     * 
+     * Performs full reconnection with strategy application:
+     * 1. Disconnect existing connection
+     * 2. Calculate exponential backoff delay
+     * 3. Wait for reconnection delay
+     * 4. Establish new connection
+     * 5. Apply reconnection strategy
+     * 
+     * @returns {Promise<void>}
+     * @throws {Error} If reconnection fails
+     * 
+     * @example
+     * await connection.reconnect();
+     * console.log('Bot reconnected successfully');
+     */
     async reconnect() {
         logger.minecraft(`🔄 Initiating reconnection for ${this._guildConfig.name}`);
         
@@ -264,6 +414,18 @@ class MinecraftConnection {
         }
     }
 
+    /**
+     * Apply server-specific reconnection strategy
+     * 
+     * Executes server-specific behavior after successful reconnection.
+     * Similar to post-connection strategy but for reconnection scenarios.
+     * Non-critical operation - reconnection remains valid even if strategy fails.
+     * 
+     * @returns {Promise<void>}
+     * 
+     * @example
+     * await connection.applyReconnectStrategy();
+     */
     async applyReconnectStrategy() {
         const serverName = this._guildConfig.server.serverName;
         logger.minecraft(`Applying ${serverName} reconnection strategy for ${this._guildConfig.name}`);
@@ -277,6 +439,21 @@ class MinecraftConnection {
         }
     }
 
+    /**
+     * Calculate reconnection delay with exponential backoff
+     * 
+     * Implements exponential backoff with jitter to avoid thundering herd problem.
+     * Delay increases with connection attempts, capped at 5x base delay.
+     * Adds random jitter (0-5 seconds) to prevent synchronized reconnections.
+     * 
+     * Formula: (baseDelay * min(attempts, 5)) + random(0-5000)
+     * 
+     * @returns {number} Delay in milliseconds
+     * 
+     * @example
+     * const delay = connection.calculateReconnectDelay();
+     * // Returns: 30000 * attempts + random(0-5000), capped at 5x
+     */
     calculateReconnectDelay() {
         // Exponential backoff with jitter
         const baseDelay = this._guildConfig.account.reconnection?.retryDelay || 30000;
@@ -286,6 +463,17 @@ class MinecraftConnection {
         return baseDelay * backoffMultiplier + jitter;
     }
 
+    /**
+     * Setup event handlers for bot
+     * 
+     * Configures handlers for:
+     * - Connection events (error, end, kicked)
+     * - Login events
+     * - Health monitoring and auto-respawn
+     * - Message processing with guild filtering
+     * 
+     * All events are logged appropriately for monitoring and debugging.
+     */
     setupEventHandlers() {
         // Connection events
         this._bot.on('error', (error) => {
@@ -340,7 +528,17 @@ class MinecraftConnection {
 
     /**
      * Handle incoming message and filter for guild messages only
+     * 
+     * Uses strategy manager to detect and classify guild messages.
+     * Non-guild messages are ignored completely.
+     * Guild messages are forwarded to message callback for further processing.
+     * 
      * @param {object} message - Raw message from Minecraft
+     * @returns {Promise<void>}
+     * 
+     * @example
+     * // Called automatically by event handler
+     * await connection.handleMessage(message);
      */
     async handleMessage(message) {
         try {
@@ -367,7 +565,16 @@ class MinecraftConnection {
 
     /**
      * Set callback for guild messages
-     * @param {function} callback - Callback function for guild messages
+     * 
+     * Callback is invoked when guild-related messages are detected.
+     * Used by BotManager to route messages for parsing and bridging.
+     * 
+     * @param {function} callback - Callback function (message, guildMessageData) => void
+     * 
+     * @example
+     * connection.setMessageCallback((message, data) => {
+     *   console.log('Guild message:', data.type);
+     * });
      */
     setMessageCallback(callback) {
         this.messageCallback = callback;
@@ -375,12 +582,34 @@ class MinecraftConnection {
 
     /**
      * Set callback for guild events
+     * 
+     * Callback is invoked when guild events are detected.
+     * Reserved for future event-specific handling.
+     * 
      * @param {function} callback - Callback function for guild events
+     * 
+     * @example
+     * connection.setEventCallback((event) => {
+     *   console.log('Guild event:', event.type);
+     * });
      */
     setEventCallback(callback) {
         this.eventCallback = callback;
     }
 
+    /**
+     * Send message to guild chat
+     * 
+     * Sends message using /gc command with automatic truncation
+     * to respect chat length limits.
+     * 
+     * @param {string} message - Message to send
+     * @returns {Promise<void>}
+     * @throws {Error} If bot is not connected or send fails
+     * 
+     * @example
+     * await connection.sendMessage('Hello guild!');
+     */
     async sendMessage(message) {
         if (!this._isConnected || !this._bot) {
             throw new Error(`Cannot send message: ${this._guildConfig.name} is not connected`);
@@ -404,6 +633,19 @@ class MinecraftConnection {
         }
     }
 
+    /**
+     * Send message to officer chat
+     * 
+     * Sends message using /oc command with automatic truncation
+     * to respect chat length limits.
+     * 
+     * @param {string} message - Message to send
+     * @returns {Promise<void>}
+     * @throws {Error} If bot is not connected or send fails
+     * 
+     * @example
+     * await connection.sendOfficerMessage('Officer announcement');
+     */
     async sendOfficerMessage(message) {
         if (!this._isConnected || !this._bot) {
             throw new Error(`Cannot send officer message: ${this._guildConfig.name} is not connected`);
@@ -427,6 +669,19 @@ class MinecraftConnection {
         }
     }
 
+    /**
+     * Execute arbitrary command on the server
+     * 
+     * Sends any command to the server without modification.
+     * Use with caution - no validation or truncation is applied.
+     * 
+     * @param {string} command - Command to execute (including /)
+     * @returns {Promise<void>}
+     * @throws {Error} If bot is not connected or command fails
+     * 
+     * @example
+     * await connection.executeCommand('/g online');
+     */
     async executeCommand(command) {
         if (!this._isConnected || !this._bot) {
             throw new Error(`Cannot execute command: ${this._guildConfig.name} is not connected`);
@@ -440,6 +695,23 @@ class MinecraftConnection {
         }
     }
 
+    /**
+     * Disconnect from Minecraft server
+     * 
+     * Cleanly disconnects bot by removing listeners and calling quit().
+     * Optionally logs disconnect as normal operation or silently for reconnection.
+     * 
+     * @param {boolean} [logAsNormal=true] - Whether to log as normal disconnect
+     * @returns {Promise<void>}
+     * 
+     * @example
+     * await connection.disconnect();
+     * // Logs disconnect event
+     * 
+     * @example
+     * await connection.disconnect(false);
+     * // Silent disconnect for reconnection
+     */
     async disconnect(logAsNormal = true) {
         if (this._bot) {
             try {
@@ -466,12 +738,40 @@ class MinecraftConnection {
         this._bot = null;
     }
 
-    // Utility methods
+    /**
+     * Wait for specified milliseconds
+     * 
+     * Utility method for creating delays in async operations.
+     * 
+     * @param {number} ms - Milliseconds to wait
+     * @returns {Promise<void>}
+     * 
+     * @example
+     * await connection.wait(5000); // Wait 5 seconds
+     */
     wait(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    // Getters for status checking
+    /**
+     * Get detailed connection status
+     * 
+     * Returns comprehensive connection information for monitoring and debugging.
+     * 
+     * @returns {object} Connection status object
+     * @returns {boolean} return.isConnected - Whether bot is connected
+     * @returns {boolean} return.isConnecting - Whether connection in progress
+     * @returns {number} return.connectionAttempts - Number of connection attempts
+     * @returns {number|null} return.lastConnectionTime - Timestamp of last connection
+     * @returns {string} return.guildName - Guild name
+     * @returns {string} return.guildId - Guild ID
+     * @returns {string} return.username - Bot username
+     * @returns {string} return.server - Server name
+     * 
+     * @example
+     * const status = connection.getConnectionStatus();
+     * console.log(`Connected: ${status.isConnected}`);
+     */
     getConnectionStatus() {
         return {
             isConnected: this._isConnected,
@@ -485,14 +785,47 @@ class MinecraftConnection {
         };
     }
     
+    /**
+     * Check if bot is connected
+     * 
+     * @returns {boolean} Whether bot is currently connected
+     * 
+     * @example
+     * if (connection.isconnected()) {
+     *   await connection.sendMessage('Hello!');
+     * }
+     */
     isconnected() {
         return this._isConnected;
     }
 
+    /**
+     * Get bot instance
+     * 
+     * Returns the underlying Mineflayer bot instance.
+     * Use with caution - direct bot manipulation may break connection management.
+     * 
+     * @returns {object|null} Mineflayer bot instance or null if not connected
+     * 
+     * @example
+     * const bot = connection.getBot();
+     * if (bot) {
+     *   console.log(`Bot health: ${bot.health}`);
+     * }
+     */
     getBot() {
         return this._bot;
     }
 
+    /**
+     * Get guild configuration
+     * 
+     * @returns {object} Guild configuration object
+     * 
+     * @example
+     * const config = connection.getGuildConfig();
+     * console.log(`Guild: ${config.name}`);
+     */
     getGuildConfig() {
         return this._guildConfig;
     }
@@ -500,10 +833,37 @@ class MinecraftConnection {
 
 /**
  * Display Microsoft authentication code with enhanced information
- * @param {Object} data - Data of the authentication code
- * @param {string} accountName - Name of the Minecraft account associated with code
- * @param {string} guildName - Name of the guild name associated with accountName
- * @param {Object} guildConfig - Complete guild configuration for additional info
+ * 
+ * Displays authentication code in a visually clear format with:
+ * - Authentication code and verification URL
+ * - Bot and guild information
+ * - Expiration time and polling interval
+ * - Step-by-step authentication instructions
+ * - Important warnings and notes
+ * 
+ * Called automatically by Mineflayer during Microsoft authentication flow.
+ * 
+ * @param {object} data - Authentication code data from Microsoft
+ * @param {string} data.user_code - Code to enter on Microsoft website
+ * @param {string} data.verification_uri - URL to visit for authentication
+ * @param {string} [data.verification_uri_complete] - Direct authentication link
+ * @param {number} data.expires_in - Code expiration time in seconds
+ * @param {number} [data.interval] - Polling interval in seconds
+ * @param {string} [accountName='Unknown'] - Minecraft account username
+ * @param {string} [guildName='Unknown'] - Guild name
+ * @param {object|null} [guildConfig=null] - Complete guild configuration
+ * 
+ * @example
+ * showMicrosoftAuthCode(
+ *   {
+ *     user_code: 'ABC123',
+ *     verification_uri: 'https://microsoft.com/link',
+ *     expires_in: 900
+ *   },
+ *   'BotName',
+ *   'MyGuild',
+ *   guildConfig
+ * );
  */
 function showMicrosoftAuthCode(data, accountName = 'Unknown', guildName = 'Unknown', guildConfig = null) {
     // Check if data is valid

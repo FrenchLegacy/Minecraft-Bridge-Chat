@@ -1,3 +1,43 @@
+/**
+ * Bot Manager - Central Minecraft Bot Connection Management
+ * 
+ * This file serves as the central orchestrator for all Minecraft bot connections,
+ * managing their lifecycle, message processing, and inter-guild communication.
+ * It extends EventEmitter to provide event-driven architecture for connection
+ * and message handling.
+ * 
+ * Key responsibilities:
+ * - Connection lifecycle management (start, stop, reconnect)
+ * - Automatic reconnection with exponential backoff
+ * - Guild message filtering and routing
+ * - Inter-guild message coordination
+ * - Event emission for connection, message, and error events
+ * - Connection status monitoring and reporting
+ * - Message sending to guild and officer chats
+ * 
+ * The BotManager coordinates between:
+ * - MinecraftConnection: Individual bot connections
+ * - MessageCoordinator: Message parsing and formatting
+ * - InterGuildManager: Cross-guild message relaying
+ * - Bridge system: Integration with Discord and other platforms
+ * 
+ * Architecture:
+ * - Uses Map for O(1) connection lookups by guild ID
+ * - Event-driven design for loose coupling with bridge system
+ * - Centralized error handling and logging
+ * - Automatic recovery from connection failures
+ * 
+ * Events emitted:
+ * - 'message': Guild chat messages
+ * - 'event': Guild events (joins, leaves, promotions, etc.)
+ * - 'connection': Connection state changes (connected, disconnected, reconnected)
+ * - 'error': Connection and processing errors
+ * 
+ * @author Fabien83560
+ * @version 1.0.0
+ * @license ISC
+ */
+
 // Globals Imports
 const EventEmitter = require('events');
 
@@ -8,7 +48,32 @@ const MessageCoordinator = require("../client/parsers/MessageCoordinator.js");
 const InterGuildManager = require("../../shared/InterGuildManager.js");
 const logger = require("../../shared/logger");
 
+/**
+ * BotManager - Manages all Minecraft bot connections
+ * 
+ * Central orchestrator for bot connections, message processing, and inter-guild
+ * communication. Extends EventEmitter for event-driven architecture.
+ * 
+ * @class
+ * @extends EventEmitter
+ */
 class BotManager extends EventEmitter {
+    /**
+     * Initialize the bot manager
+     * 
+     * Sets up:
+     * - Configuration from main bridge
+     * - Connection map for all guilds
+     * - Reconnection timer tracking
+     * - Message coordinator for parsing
+     * - Inter-guild manager for cross-guild communication
+     * 
+     * Automatically initializes connections for all enabled guilds.
+     * 
+     * @example
+     * const botManager = new BotManager();
+     * await botManager.startAll();
+     */
     constructor() {
         super();
 
@@ -23,6 +88,19 @@ class BotManager extends EventEmitter {
         this.initialize();
     }
 
+    /**
+     * Initialize connections for all enabled guilds
+     * 
+     * Creates MinecraftConnection instances for each enabled guild and
+     * sets up message callbacks for guild message handling.
+     * Does not start connections - call startAll() to connect.
+     * 
+     * @returns {Promise<void>}
+     * 
+     * @example
+     * await botManager.initialize();
+     * console.log('All connections initialized');
+     */
     async initialize() {
         const enabledGuilds = this.config.getEnabledGuilds();
 
@@ -40,6 +118,26 @@ class BotManager extends EventEmitter {
         });
     }
 
+    /**
+     * Start all guild connections
+     * 
+     * Attempts to start all initialized connections in parallel using Promise.allSettled.
+     * Logs success/failure summary and emits connection events.
+     * Throws error if no connections succeed.
+     * 
+     * Connection process for each guild:
+     * 1. Establish connection
+     * 2. Setup monitoring
+     * 3. Emit 'connection' event
+     * 4. Schedule reconnection on failure
+     * 
+     * @returns {Promise<void>}
+     * @throws {Error} If all connections fail to start
+     * 
+     * @example
+     * await botManager.startAll();
+     * console.log('All bots connected');
+     */
     async startAll() {
         const connectionPromises = [];
 
@@ -73,6 +171,20 @@ class BotManager extends EventEmitter {
         }
     }
 
+    /**
+     * Start connection for a specific guild
+     * 
+     * Establishes connection, sets up monitoring, and emits connection event.
+     * Schedules automatic reconnection if connection fails.
+     * 
+     * @param {string} guildId - Guild ID to connect
+     * @returns {Promise<void>}
+     * @throws {Error} If connection fails or guild not found
+     * 
+     * @example
+     * await botManager.startConnection('guild1');
+     * console.log('Guild connected');
+     */
     async startConnection(guildId) {
         const connection = this.connections.get(guildId);
         if (!connection) {
@@ -100,6 +212,21 @@ class BotManager extends EventEmitter {
         }
     }
 
+    /**
+     * Setup connection monitoring for automatic reconnection
+     * 
+     * Monitors bot for:
+     * - Disconnections: Schedules automatic reconnection
+     * - Errors: Emits error events
+     * 
+     * Note: Message handling is done via callbacks set in initialize(),
+     * not monitored here.
+     * 
+     * @param {string} guildId - Guild ID to monitor
+     * 
+     * @example
+     * botManager.setupConnectionMonitoring('guild1');
+     */
     setupConnectionMonitoring(guildId) {
         const connection = this.connections.get(guildId);
         if (!connection)
@@ -136,9 +263,31 @@ class BotManager extends EventEmitter {
 
     /**
      * Handle guild messages that have been filtered by the strategy
+     * 
+     * Processing pipeline:
+     * 1. Validate guild connection exists
+     * 2. Parse message through MessageCoordinator
+     * 3. Add strategy metadata
+     * 4. Handle inter-guild processing if needed
+     * 5. Emit appropriate event (message or event)
+     * 
+     * Only processes messages that passed strategy filtering (guild-related).
+     * Logs all processing steps with [GUILD] prefix for clarity.
+     * 
      * @param {string} guildId - Guild ID
      * @param {object} rawMessage - Raw message from Minecraft
      * @param {object} guildMessageData - Processed guild message data from strategy
+     * @param {string} guildMessageData.type - Message type (GUILD_CHAT, OFFICER_CHAT, etc.)
+     * @param {string} guildMessageData.category - Category (chat, event, system)
+     * @param {string} guildMessageData.subtype - Subtype (guild, officer, join, etc.)
+     * @param {boolean} guildMessageData.needsInterGuildProcessing - Whether to relay inter-guild
+     * 
+     * @example
+     * botManager.handleGuildMessage(
+     *   'guild1',
+     *   rawMessage,
+     *   { type: 'GUILD_CHAT', category: 'chat', needsInterGuildProcessing: true }
+     * );
      */
     handleGuildMessage(guildId, rawMessage, guildMessageData) {
         const connection = this.connections.get(guildId);
@@ -184,9 +333,27 @@ class BotManager extends EventEmitter {
 
     /**
      * Handle inter-guild processing for messages and events
-     * @param {object} result - Processed message/event result
+     * 
+     * Routes messages and events to InterGuildManager for cross-guild relaying.
+     * Only processes if:
+     * - needsInterGuildProcessing flag is true
+     * - Message is guild chat OR
+     * - Event was successfully parsed
+     * 
+     * @param {object} result - Processed message/event result from MessageCoordinator
+     * @param {string} result.category - Result category ('message' or 'event')
+     * @param {object} result.data - Parsed data with type and content
      * @param {object} guildConfig - Guild configuration
      * @param {object} guildMessageData - Strategy message data
+     * @param {boolean} guildMessageData.needsInterGuildProcessing - Whether to process
+     * @returns {Promise<void>}
+     * 
+     * @example
+     * await botManager.handleInterGuildProcessing(
+     *   { category: 'message', data: { type: 'guild_chat', message: 'Hello' } },
+     *   guildConfig,
+     *   { needsInterGuildProcessing: true }
+     * );
      */
     async handleInterGuildProcessing(result, guildConfig, guildMessageData) {
         try {
@@ -209,6 +376,25 @@ class BotManager extends EventEmitter {
         }
     }
 
+    /**
+     * Schedule automatic reconnection for a guild
+     * 
+     * Schedules reconnection with delay from guild configuration.
+     * Clears any existing reconnection timer before scheduling new one.
+     * Respects reconnection.enabled flag - no reconnection if disabled.
+     * 
+     * On reconnection:
+     * - Calls connection.reconnect()
+     * - Re-establishes monitoring
+     * - Emits 'reconnected' event
+     * - Schedules another reconnection on failure
+     * 
+     * @param {string} guildId - Guild ID to reconnect
+     * 
+     * @example
+     * botManager.scheduleReconnection('guild1');
+     * // Reconnection scheduled based on guild config
+     */
     scheduleReconnection(guildId) {
         const connection = this.connections.get(guildId);
         if (!connection)
@@ -257,6 +443,23 @@ class BotManager extends EventEmitter {
         this.reconnectTimers.set(guildId, timer);
     }
 
+    /**
+     * Stop all guild connections
+     * 
+     * Gracefully shuts down:
+     * 1. Clears all reconnection timers
+     * 2. Stops inter-guild queue processor
+     * 3. Disconnects all bot connections
+     * 
+     * Uses Promise.allSettled to ensure all disconnections are attempted
+     * even if some fail.
+     * 
+     * @returns {Promise<void>}
+     * 
+     * @example
+     * await botManager.stopAll();
+     * console.log('All bots disconnected');
+     */
     async stopAll() {
         // Clear all reconnection timers
         for (const timer of this.reconnectTimers.values()) {
@@ -281,7 +484,21 @@ class BotManager extends EventEmitter {
         logger.minecraft('All connections stopped');
     }
 
-    // Public methods for message sending
+    /**
+     * Send message to guild chat
+     * 
+     * Sends message to specified guild's chat using /gc command.
+     * Validates connection exists and is active before sending.
+     * Includes detailed logging with [INTER-GUILD] prefix.
+     * 
+     * @param {string} guildId - Guild ID to send to
+     * @param {string} message - Message to send
+     * @returns {Promise<void>}
+     * @throws {Error} If guild not found, not connected, or send fails
+     * 
+     * @example
+     * await botManager.sendMessage('guild1', 'Hello from another guild!');
+     */
     async sendMessage(guildId, message) {
         const connection = this.connections.get(guildId);
         if (!connection) {
@@ -308,6 +525,21 @@ class BotManager extends EventEmitter {
         }
     }
 
+    /**
+     * Send message to officer chat
+     * 
+     * Sends message to specified guild's officer chat using /oc command.
+     * Validates connection exists and is active before sending.
+     * Includes detailed logging with [INTER-GUILD] prefix.
+     * 
+     * @param {string} guildId - Guild ID to send to
+     * @param {string} message - Message to send
+     * @returns {Promise<void>}
+     * @throws {Error} If guild not found, not connected, or send fails
+     * 
+     * @example
+     * await botManager.sendOfficerMessage('guild1', 'Officer announcement');
+     */
     async sendOfficerMessage(guildId, message) {
         const connection = this.connections.get(guildId);
         if (!connection) {
@@ -334,6 +566,20 @@ class BotManager extends EventEmitter {
         }
     }
 
+    /**
+     * Execute arbitrary command on guild bot
+     * 
+     * Sends any command to the specified guild's bot.
+     * No validation or formatting applied - command sent as-is.
+     * 
+     * @param {string} guildId - Guild ID to execute on
+     * @param {string} command - Command to execute (including /)
+     * @returns {Promise<void>}
+     * @throws {Error} If guild not found or not connected
+     * 
+     * @example
+     * await botManager.executeCommand('guild1', '/g online');
+     */
     async executeCommand(guildId, command) {
         const connection = this.connections.get(guildId);
         if (!connection) {
@@ -347,7 +593,27 @@ class BotManager extends EventEmitter {
         return connection.executeCommand(command);
     }
 
-    // Status methods
+    /**
+     * Get connection status for all guilds
+     * 
+     * Returns detailed status information for every guild connection
+     * including connection state, attempts, timing, and configuration.
+     * 
+     * @returns {object} Status map keyed by guild ID
+     * @returns {boolean} return[guildId].isConnected - Whether connected
+     * @returns {boolean} return[guildId].isConnecting - Whether connecting
+     * @returns {number} return[guildId].connectionAttempts - Attempt count
+     * @returns {number} return[guildId].lastConnectionTime - Last connection timestamp
+     * @returns {string} return[guildId].guildName - Guild name
+     * @returns {string} return[guildId].username - Bot username
+     * @returns {string} return[guildId].server - Server name
+     * 
+     * @example
+     * const status = botManager.getConnectionStatus();
+     * for (const [id, info] of Object.entries(status)) {
+     *   console.log(`${info.guildName}: ${info.isConnected ? 'Connected' : 'Disconnected'}`);
+     * }
+     */
     getConnectionStatus() {
         const status = {};
         
@@ -358,11 +624,39 @@ class BotManager extends EventEmitter {
         return status;
     }
 
+    /**
+     * Check if specific guild is connected
+     * 
+     * @param {string} guildId - Guild ID to check
+     * @returns {boolean} Whether guild is connected
+     * 
+     * @example
+     * if (botManager.isGuildConnected('guild1')) {
+     *   console.log('Guild is online');
+     * }
+     */
     isGuildConnected(guildId) {
         const connection = this.connections.get(guildId);
         return connection ? connection.isconnected() : false;
     }
 
+    /**
+     * Get list of all connected guilds
+     * 
+     * Returns array of connected guild information for monitoring
+     * and inter-guild coordination.
+     * 
+     * @returns {Array<object>} Array of connected guild info
+     * @returns {string} return[].guildId - Guild ID
+     * @returns {string} return[].guildName - Guild name
+     * @returns {string} return[].username - Bot username
+     * @returns {string} return[].guildTag - Guild tag
+     * 
+     * @example
+     * const connected = botManager.getConnectedGuilds();
+     * console.log(`${connected.length} guilds online`);
+     * connected.forEach(g => console.log(`- ${g.guildName} [${g.guildTag}]`));
+     */
     getConnectedGuilds() {
         const connectedGuilds = [];
         
@@ -380,6 +674,20 @@ class BotManager extends EventEmitter {
         return connectedGuilds;
     }
 
+    /**
+     * Update inter-guild configuration
+     * 
+     * Updates InterGuildManager configuration at runtime without restart.
+     * Useful for adjusting rate limits, enabling/disabling features, etc.
+     * 
+     * @param {object} newConfig - New inter-guild configuration
+     * 
+     * @example
+     * botManager.updateInterGuildConfig({
+     *   enabled: true,
+     *   rateLimitMs: 1000
+     * });
+     */
     updateInterGuildConfig(newConfig) {
         if (this.interGuildManager) {
             this.interGuildManager.updateConfig(newConfig);
@@ -387,6 +695,12 @@ class BotManager extends EventEmitter {
         }
     }
 
+    /**
+     * Clear inter-guild cache
+     * 
+     * Clears message queue and rate limit cache in InterGuildManager.
+     * Useful for troubleshooting or manual intervention.
+     */
     clearInterGuildCache() {
         if (this.interGuildManager) {
             this.interGuildManager.clearQueue();
@@ -395,19 +709,66 @@ class BotManager extends EventEmitter {
         }
     }
 
-    // Event forwarding methods
+    /**
+     * Register callback for message events
+     * 
+     * Callback receives parsed message data from guild chat.
+     * 
+     * @param {function} callback - Callback function (messageData) => void
+     * 
+     * @example
+     * botManager.onMessage((data) => {
+     *   console.log(`${data.username}: ${data.message}`);
+     * });
+     */
     onMessage(callback) {
         this.on('message', callback);
     }
 
+    /**
+     * Register callback for event events
+     * 
+     * Callback receives parsed event data (joins, leaves, promotions, etc.).
+     * 
+     * @param {function} callback - Callback function (eventData) => void
+     * 
+     * @example
+     * botManager.onEvent((data) => {
+     *   console.log(`Event: ${data.type} - ${data.username}`);
+     * });
+     */
     onEvent(callback) {
         this.on('event', callback);
     }
 
+    /**
+     * Register callback for connection events
+     * 
+     * Callback receives connection state changes (connected, disconnected, reconnected).
+     * 
+     * @param {function} callback - Callback function (connectionData) => void
+     * 
+     * @example
+     * botManager.onConnection((data) => {
+     *   console.log(`${data.guildName}: ${data.type}`);
+     * });
+     */
     onConnection(callback) {
         this.on('connection', callback);
     }
 
+    /**
+     * Register callback for error events
+     * 
+     * Callback receives error objects from connection and processing failures.
+     * 
+     * @param {function} callback - Callback function (error, guildId) => void
+     * 
+     * @example
+     * botManager.onError((error, guildId) => {
+     *   console.error(`Error in guild ${guildId}:`, error);
+     * });
+     */
     onError(callback) {
         this.on('error', callback);
     }
