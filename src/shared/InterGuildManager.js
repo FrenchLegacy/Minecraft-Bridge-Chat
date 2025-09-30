@@ -1,9 +1,88 @@
+/**
+ * Inter-Guild Manager - Cross-Guild Message and Event Broadcasting System
+ * 
+ * This class manages the broadcasting of messages and events between multiple Minecraft
+ * guilds, creating a unified communication network. It handles message routing, anti-loop
+ * protection, duplicate detection, rate limiting, and reliable delivery through a queue system.
+ * 
+ * The manager provides:
+ * - Cross-guild message broadcasting (guild chat and officer chat)
+ * - Guild event sharing between connected guilds
+ * - Advanced anti-loop and duplicate detection system
+ * - Rate limiting to prevent spam
+ * - Reliable message delivery with queue and retry mechanism
+ * - Officer-to-officer and officer-to-guild chat modes
+ * - Discord integration for unified Minecraft-Discord communication
+ * - Message history tracking for duplicate prevention
+ * - Hash-based duplicate detection across guilds
+ * - Automatic cleanup of stale tracking data
+ * 
+ * Anti-loop protection features:
+ * - Bot message filtering (never relay own messages)
+ * - Relay pattern detection (multiple regex patterns)
+ * - Message history tracking (last 10 messages per guild)
+ * - Hash-based duplicate detection (30-second window)
+ * - Same-guild prevention (multiple verification checks)
+ * 
+ * Message flow:
+ * 1. Message received from source guild
+ * 2. Anti-loop/duplicate checks performed
+ * 3. Rate limiting validation
+ * 4. Message formatted for each target guild
+ * 5. Messages queued for reliable delivery
+ * 6. Queue processor delivers with retry logic
+ * 7. Discord integration sends to Discord channels
+ * 
+ * Officer chat modes:
+ * - officerToOfficerChat: Officer messages sent to other guilds' officer chats
+ * - officerToGuildChat: Officer messages also sent to guild chats
+ * 
+ * Queue system features:
+ * - Automatic retry with exponential backoff
+ * - Maximum 3 delivery attempts per message
+ * - Connection status checking before delivery
+ * - 1 second delay between messages
+ * 
+ * @author Fabien83560
+ * @version 1.0.0
+ * @license ISC
+ */
+
 // Specific Imports
 const logger = require('./logger');
 const MessageFormatter = require('./MessageFormatter.js');
 const BridgeLocator = require('../bridgeLocator.js');
 
+/**
+ * InterGuildManager - Manage cross-guild message and event broadcasting
+ * 
+ * Central manager class that handles all inter-guild communication including message
+ * routing, event broadcasting, anti-loop protection, rate limiting, and reliable
+ * delivery through a queue system.
+ * 
+ * @class
+ */
 class InterGuildManager {
+    /**
+     * Create a new InterGuildManager instance
+     * 
+     * Initializes the manager with configuration, message formatter, rate limiting,
+     * anti-loop protection systems, and message queue. Sets up tracking systems for
+     * duplicate detection and message history.
+     * 
+     * Configuration loaded:
+     * - interGuildConfig: Inter-guild feature settings
+     * - rateLimit: Rate limiting configuration (default: 2 messages per 10 seconds)
+     * - shareableEvents: Events to share between guilds
+     * - officerToOfficerChat: Officer chat routing setting
+     * - officerToGuildChat: Officer to guild chat routing setting
+     * 
+     * Tracking systems initialized:
+     * - messageHashes: Hash-based duplicate detection (30-second window)
+     * - messageHistory: Recent message tracking (10 messages per guild)
+     * - rateLimiter: Rate limit tracking per guild
+     * - messageQueue: Reliable delivery queue
+     */
     constructor() {
         const mainBridge = BridgeLocator.getInstance();
         this.config = mainBridge.config;
@@ -32,6 +111,26 @@ class InterGuildManager {
         this.initialize();
     }
 
+    /**
+     * Initialize the inter-guild manager
+     * 
+     * Sets up the message formatter with configuration, starts the queue processor
+     * if inter-guild features are enabled, initiates cleanup intervals for anti-loop
+     * data, and establishes Discord integration.
+     * 
+     * Initialization steps:
+     * 1. Create MessageFormatter with inter-guild config
+     * 2. Start queue processor if enabled
+     * 3. Start cleanup interval for anti-loop data
+     * 4. Setup Discord integration
+     * 
+     * @async
+     * @throws {Error} If initialization fails
+     * 
+     * @example
+     * const manager = new InterGuildManager();
+     * // Automatically calls initialize() in constructor
+     */
     async initialize() {
         try {
             // Initialize message formatter
@@ -67,6 +166,13 @@ class InterGuildManager {
 
     /**
      * Setup Discord integration
+     * 
+     * Establishes connection to Discord manager for unified Minecraft-Discord
+     * communication. Allows inter-guild messages to also be sent to Discord channels.
+     * 
+     * @example
+     * // Internal usage during initialization
+     * this.setupDiscordIntegration();
      */
     setupDiscordIntegration() {
         try {
@@ -85,8 +191,16 @@ class InterGuildManager {
     }
 
     /**
-     * Set Discord manager reference (called from main bridge)
+     * Set Discord manager reference
+     * 
+     * Updates the Discord manager reference. Called from main bridge when Discord
+     * manager becomes available after initialization.
+     * 
      * @param {object} discordManager - Discord manager instance
+     * 
+     * @example
+     * // Called from main bridge
+     * interGuildManager.setDiscordManager(discordManager);
      */
     setDiscordManager(discordManager) {
         this._discordManager = discordManager;
@@ -95,9 +209,44 @@ class InterGuildManager {
 
     /**
      * Process a guild message for inter-guild transfer
-     * @param {object} messageData - Parsed message data
+     * 
+     * Main entry point for guild message processing. Handles both regular guild chat
+     * and officer chat messages with configurable routing. Performs anti-loop checks,
+     * rate limiting, message formatting, and queuing for all target guilds.
+     * 
+     * Processing flow:
+     * 1. Check if inter-guild is enabled
+     * 2. Perform anti-loop and duplicate detection
+     * 3. Handle officer message routing based on config
+     * 4. Get target guilds (all except source)
+     * 5. Check rate limiting
+     * 6. Format and queue messages for each target
+     * 7. Send to Discord if available
+     * 
+     * Officer chat modes:
+     * - If officerToOfficerChat: Route to officer chats
+     * - If officerToGuildChat: Also route to guild chats
+     * - If neither: Skip officer messages
+     * 
+     * @async
+     * @param {object} messageData - Parsed message data from Minecraft
+     * @param {string} messageData.username - Username of sender
+     * @param {string} messageData.message - Message content
+     * @param {string} [messageData.chatType='guild'] - Chat type ('guild' or 'officer')
+     * @param {string} [messageData.rank] - Player rank (optional)
      * @param {object} sourceGuildConfig - Source guild configuration
+     * @param {string} sourceGuildConfig.id - Source guild ID
+     * @param {string} sourceGuildConfig.name - Source guild name
+     * @param {object} sourceGuildConfig.account - Bot account info
+     * @param {string} sourceGuildConfig.account.username - Bot username
      * @param {object} minecraftManager - Minecraft manager instance for sending messages
+     * 
+     * @example
+     * await interGuildManager.processGuildMessage(
+     *   { username: "Player123", message: "Hello!", chatType: "guild" },
+     *   sourceGuildConfig,
+     *   minecraftManager
+     * );
      */
     async processGuildMessage(messageData, sourceGuildConfig, minecraftManager) {
         if (!this.interGuildConfig.enabled) {
@@ -176,9 +325,28 @@ class InterGuildManager {
 
     /**
      * Process officer messages for inter-guild transfer
+     * 
+     * Specialized handler for officer chat messages. Routes officer messages to other
+     * guilds' officer chats when officerToOfficerChat is enabled. Performs same anti-loop
+     * checks, rate limiting, and queueing as regular messages.
+     * 
+     * @async
      * @param {object} messageData - Parsed officer message data
+     * @param {string} messageData.username - Username of sender
+     * @param {string} messageData.message - Message content
+     * @param {string} messageData.chatType - Should be 'officer'
      * @param {object} sourceGuildConfig - Source guild configuration
-     * @param {object} minecraftManager - Minecraft manager instance for sending messages
+     * @param {string} sourceGuildConfig.id - Source guild ID
+     * @param {string} sourceGuildConfig.name - Source guild name
+     * @param {object} minecraftManager - Minecraft manager instance
+     * 
+     * @example
+     * // Internal usage from processGuildMessage
+     * await this.processOfficerMessage(
+     *   { username: "Officer1", message: "Admin message", chatType: "officer" },
+     *   sourceGuildConfig,
+     *   minecraftManager
+     * );
      */
     async processOfficerMessage(messageData, sourceGuildConfig, minecraftManager) {
         // Check if officer-to-officer chat is enabled
@@ -236,10 +404,38 @@ class InterGuildManager {
     }
 
     /**
-     * Check if message is a loop or duplicate (with officer chat support)
-     * @param {object} messageData - Message data
+     * Check if message is a loop or duplicate
+     * 
+     * Performs comprehensive anti-loop and duplicate detection using multiple strategies:
+     * 1. Bot message filtering - Always filter messages from own bot
+     * 2. Relay pattern detection - Regex patterns for relay formats
+     * 3. Message history checking - Recent message tracking per guild
+     * 4. Hash-based duplicate detection - Cross-guild duplicate prevention
+     * 
+     * Relay patterns detected:
+     * - "User: message"
+     * - "User: User: message"
+     * - "User1: User2: message"
+     * - "[TAG] User: message"
+     * - "[TAG] User [Rank]: message"
+     * - "[TAG] [OFFICER] User: message" (officer chat)
+     * 
+     * @param {object} messageData - Message data to check
+     * @param {string} messageData.message - Message content
+     * @param {string} messageData.username - Sender username
+     * @param {string} [messageData.chatType='guild'] - Chat type
      * @param {object} sourceGuildConfig - Source guild configuration
-     * @returns {boolean} Whether message should be dropped as loop/duplicate
+     * @param {object} sourceGuildConfig.account - Bot account info
+     * @param {string} sourceGuildConfig.account.username - Bot username
+     * @param {string} sourceGuildConfig.id - Guild ID
+     * @returns {boolean} True if message should be filtered (is loop/duplicate)
+     * 
+     * @example
+     * const isDuplicate = manager.isMessageLoopOrDuplicate(messageData, guildConfig);
+     * if (isDuplicate) {
+     *   logger.debug("Message filtered as duplicate/loop");
+     *   return;
+     * }
      */
     isMessageLoopOrDuplicate(messageData, sourceGuildConfig) {
         if (!messageData.message || !messageData.username) {
@@ -329,9 +525,21 @@ class InterGuildManager {
     }
 
     /**
-     * Track message for loop detection (with chat type support)
-     * @param {object} messageData - Message data
+     * Track message for loop detection
+     * 
+     * Adds message to guild's message history for duplicate detection. Maintains
+     * a sliding window of the last 10 messages per guild-chatType combination.
+     * 
+     * @param {object} messageData - Message data to track
+     * @param {string} messageData.message - Message content
+     * @param {string} messageData.username - Sender username
+     * @param {string} [messageData.chatType='guild'] - Chat type
      * @param {object} sourceGuildConfig - Source guild configuration
+     * @param {string} sourceGuildConfig.id - Guild ID
+     * 
+     * @example
+     * // Internal usage after anti-loop check passes
+     * this.trackMessage(messageData, sourceGuildConfig);
      */
     trackMessage(messageData, sourceGuildConfig) {
         const chatType = messageData.chatType || 'guild';
@@ -355,11 +563,19 @@ class InterGuildManager {
     }
 
     /**
-     * Generate hash for message content (with chat type)
+     * Generate hash for message content
+     * 
+     * Creates a simple hash from username, message, and chat type for duplicate
+     * detection across guilds. Uses a basic hash algorithm that converts to 32-bit integer.
+     * 
      * @param {string} message - Message content
-     * @param {string} username - Username
-     * @param {string} chatType - Chat type (guild/officer)
-     * @returns {string} Message hash
+     * @param {string} username - Username of sender
+     * @param {string} [chatType='guild'] - Chat type ('guild' or 'officer')
+     * @returns {string} Message hash as string
+     * 
+     * @example
+     * const hash = manager.generateMessageHash("Hello!", "Player123", "guild");
+     * // Returns: "123456789" (example hash)
      */
     generateMessageHash(message, username, chatType = 'guild') {
         // Simple hash combining username, message, and chat type
@@ -376,7 +592,15 @@ class InterGuildManager {
     }
 
     /**
-     * NEW: Start cleanup interval for anti-loop protection
+     * Start cleanup interval for anti-loop protection
+     * 
+     * Initiates a periodic cleanup process (every 60 seconds) to remove stale data
+     * from anti-loop tracking systems. Prevents memory leaks by removing old hashes
+     * and message history outside the detection window.
+     * 
+     * @example
+     * // Internal usage during initialization
+     * this.startCleanupInterval();
      */
     startCleanupInterval() {
         setInterval(() => {
@@ -385,7 +609,20 @@ class InterGuildManager {
     }
 
     /**
-     * NEW: Clean up old anti-loop data
+     * Clean up old anti-loop data
+     * 
+     * Removes stale data from message hashes and message history that are older
+     * than the duplicate detection window (30 seconds). Runs periodically to
+     * prevent memory buildup from tracking systems.
+     * 
+     * Cleanup operations:
+     * - Remove message hashes older than detection window
+     * - Filter message history to keep only recent messages
+     * - Delete empty message history entries
+     * 
+     * @example
+     * // Called automatically every minute
+     * this.cleanupAntiLoopData();
      */
     cleanupAntiLoopData() {
         const now = Date.now();
@@ -413,9 +650,35 @@ class InterGuildManager {
 
     /**
      * Process a guild event for inter-guild transfer
-     * @param {object} eventData - Parsed event data
+     * 
+     * Broadcasts guild events to all connected guilds based on shareableEvents
+     * configuration. Performs same-guild verification to prevent loops and sends
+     * events to Discord if available.
+     * 
+     * Shareable event types (default):
+     * - welcome: Player joining
+     * - disconnect: Player disconnecting
+     * - kick: Player kicked
+     * - promote: Player promoted
+     * - demote: Player demoted
+     * - level: Guild level up
+     * - motd: MOTD changed
+     * 
+     * @async
+     * @param {object} eventData - Parsed event data from Minecraft
+     * @param {string} eventData.type - Event type
+     * @param {string} [eventData.username] - Username involved
      * @param {object} sourceGuildConfig - Source guild configuration
-     * @param {object} minecraftManager - Minecraft manager instance for sending messages
+     * @param {string} sourceGuildConfig.id - Source guild ID
+     * @param {string} sourceGuildConfig.name - Source guild name
+     * @param {object} minecraftManager - Minecraft manager instance
+     * 
+     * @example
+     * await interGuildManager.processGuildEvent(
+     *   { type: "promote", username: "Player123", toRank: "Officer" },
+     *   sourceGuildConfig,
+     *   minecraftManager
+     * );
      */
     async processGuildEvent(eventData, sourceGuildConfig, minecraftManager) {
         if (!this.interGuildConfig.enabled) {
@@ -471,10 +734,27 @@ class InterGuildManager {
     }
 
     /**
-     * CRITICAL: Check if source and target guilds are the same
+     * Check if source and target guilds are the same
+     * 
+     * Performs comprehensive check using multiple guild identifiers (ID, name, tag)
+     * to ensure we never send messages/events from a guild back to itself.
+     * Critical safety function for preventing message loops.
+     * 
      * @param {object} sourceGuildConfig - Source guild configuration
+     * @param {string} sourceGuildConfig.id - Source guild ID
+     * @param {string} sourceGuildConfig.name - Source guild name
+     * @param {string} [sourceGuildConfig.tag] - Source guild tag
      * @param {object} targetGuildConfig - Target guild configuration
-     * @returns {boolean} Whether guilds are the same
+     * @param {string} targetGuildConfig.id - Target guild ID
+     * @param {string} targetGuildConfig.name - Target guild name
+     * @param {string} [targetGuildConfig.tag] - Target guild tag
+     * @returns {boolean} True if guilds are the same
+     * 
+     * @example
+     * if (manager.isSameGuild(sourceGuild, targetGuild)) {
+     *   logger.warn("Prevented self-messaging!");
+     *   return;
+     * }
      */
     isSameGuild(sourceGuildConfig, targetGuildConfig) {
         // Check multiple identifiers to be absolutely sure
@@ -485,10 +765,30 @@ class InterGuildManager {
 
     /**
      * Send a formatted message to a specific guild
-     * @param {object} messageData - Message data
-     * @param {object} sourceGuildConfig - Source guild config
-     * @param {object} targetGuildConfig - Target guild config
+     * 
+     * Formats message using MessageFormatter and queues it for reliable delivery
+     * to target guild. Includes safety check to prevent self-messaging.
+     * 
+     * @async
+     * @param {object} messageData - Message data to send
+     * @param {string} messageData.username - Sender username
+     * @param {string} messageData.message - Message content
+     * @param {object} sourceGuildConfig - Source guild configuration
+     * @param {string} sourceGuildConfig.name - Source guild name
+     * @param {string} sourceGuildConfig.id - Source guild ID
+     * @param {object} targetGuildConfig - Target guild configuration
+     * @param {string} targetGuildConfig.id - Target guild ID
+     * @param {string} targetGuildConfig.name - Target guild name
      * @param {object} minecraftManager - Minecraft manager instance
+     * 
+     * @example
+     * // Internal usage from processGuildMessage
+     * await this.sendMessageToGuild(
+     *   messageData,
+     *   sourceGuild,
+     *   targetGuild,
+     *   minecraftManager
+     * );
      */
     async sendMessageToGuild(messageData, sourceGuildConfig, targetGuildConfig, minecraftManager) {
         try {
@@ -534,10 +834,31 @@ class InterGuildManager {
 
     /**
      * Send a formatted officer message to a specific guild
-     * @param {object} messageData - Officer message data
-     * @param {object} sourceGuildConfig - Source guild config
-     * @param {object} targetGuildConfig - Target guild config
+     * 
+     * Formats officer message and queues it for delivery to target guild's officer chat.
+     * Includes safety check to prevent self-messaging.
+     * 
+     * @async
+     * @param {object} messageData - Officer message data to send
+     * @param {string} messageData.username - Sender username
+     * @param {string} messageData.message - Message content
+     * @param {string} messageData.chatType - Should be 'officer'
+     * @param {object} sourceGuildConfig - Source guild configuration
+     * @param {string} sourceGuildConfig.name - Source guild name
+     * @param {string} sourceGuildConfig.id - Source guild ID
+     * @param {object} targetGuildConfig - Target guild configuration
+     * @param {string} targetGuildConfig.id - Target guild ID
+     * @param {string} targetGuildConfig.name - Target guild name
      * @param {object} minecraftManager - Minecraft manager instance
+     * 
+     * @example
+     * // Internal usage from processOfficerMessage
+     * await this.sendOfficerMessageToGuild(
+     *   officerMessageData,
+     *   sourceGuild,
+     *   targetGuild,
+     *   minecraftManager
+     * );
      */
     async sendOfficerMessageToGuild(messageData, sourceGuildConfig, targetGuildConfig, minecraftManager) {
         try {
@@ -583,10 +904,30 @@ class InterGuildManager {
 
     /**
      * Send a formatted event to a specific guild
-     * @param {object} eventData - Event data
-     * @param {object} sourceGuildConfig - Source guild config
-     * @param {object} targetGuildConfig - Target guild config
+     * 
+     * Formats guild event and queues it for delivery to target guild. Includes safety
+     * check to prevent self-messaging and filters out "unknown_event_type" fallbacks.
+     * 
+     * @async
+     * @param {object} eventData - Event data to send
+     * @param {string} eventData.type - Event type
+     * @param {string} [eventData.username] - Username involved
+     * @param {object} sourceGuildConfig - Source guild configuration
+     * @param {string} sourceGuildConfig.name - Source guild name
+     * @param {string} sourceGuildConfig.id - Source guild ID
+     * @param {object} targetGuildConfig - Target guild configuration
+     * @param {string} targetGuildConfig.id - Target guild ID
+     * @param {string} targetGuildConfig.name - Target guild name
      * @param {object} minecraftManager - Minecraft manager instance
+     * 
+     * @example
+     * // Internal usage from processGuildEvent
+     * await this.sendEventToGuild(
+     *   eventData,
+     *   sourceGuild,
+     *   targetGuild,
+     *   minecraftManager
+     * );
      */
     async sendEventToGuild(eventData, sourceGuildConfig, targetGuildConfig, minecraftManager) {
         try {
@@ -633,8 +974,28 @@ class InterGuildManager {
 
     /**
      * Queue a message for reliable delivery
+     * 
+     * Adds message to delivery queue with Minecraft manager reference. Queue processor
+     * will handle actual delivery with retry logic.
+     * 
      * @param {object} messageItem - Message item to queue
-     * @param {object} minecraftManager - Minecraft manager instance
+     * @param {string} messageItem.type - Message type ('message', 'officer_message', 'event')
+     * @param {string} messageItem.guildId - Target guild ID
+     * @param {string} messageItem.message - Formatted message
+     * @param {string} messageItem.targetGuild - Target guild name
+     * @param {number} messageItem.attempts - Current attempt count
+     * @param {number} messageItem.maxAttempts - Maximum attempts (3)
+     * @param {object} minecraftManager - Minecraft manager instance for delivery
+     * 
+     * @example
+     * // Internal usage from send methods
+     * this.queueMessage({
+     *   type: 'message',
+     *   guildId: 'guild123',
+     *   message: '[GuildA] Player: Hello!',
+     *   attempts: 0,
+     *   maxAttempts: 3
+     * }, minecraftManager);
      */
     queueMessage(messageItem, minecraftManager) {
         messageItem.minecraftManager = minecraftManager;
@@ -645,6 +1006,13 @@ class InterGuildManager {
 
     /**
      * Start the message queue processor
+     * 
+     * Initiates the queue processing loop if not already running. The processor
+     * continuously checks the queue and delivers messages with 1-second intervals.
+     * 
+     * @example
+     * // Called during initialization if inter-guild is enabled
+     * this.startQueueProcessor();
      */
     startQueueProcessor() {
         if (this.isProcessingQueue) {
@@ -657,6 +1025,15 @@ class InterGuildManager {
 
     /**
      * Process the message queue
+     * 
+     * Main queue processing loop. Continuously checks for queued messages and delivers
+     * them with 1-second intervals. Handles errors with longer retry delays (5 seconds).
+     * Runs until stopQueueProcessor() is called.
+     * 
+     * @async
+     * @example
+     * // Started automatically by startQueueProcessor()
+     * await this.processQueue();
      */
     async processQueue() {
         while (this.isProcessingQueue) {
@@ -678,7 +1055,32 @@ class InterGuildManager {
 
     /**
      * Deliver a queued message
+     * 
+     * Attempts to deliver a queued message with retry logic. Checks guild connection
+     * status, performs final same-guild verification, and sends via appropriate method
+     * based on message type. Implements exponential backoff for retries.
+     * 
+     * Retry logic:
+     * - Max 3 attempts per message
+     * - Connection check before delivery
+     * - Exponential backoff: 2s * attempt number
+     * - Final safety check to prevent self-messaging
+     * 
+     * @async
      * @param {object} messageItem - Message item from queue
+     * @param {string} messageItem.type - Message type
+     * @param {string} messageItem.guildId - Target guild ID
+     * @param {string} messageItem.message - Formatted message
+     * @param {string} messageItem.targetGuild - Target guild name
+     * @param {number} messageItem.attempts - Current attempt count
+     * @param {number} messageItem.maxAttempts - Maximum attempts
+     * @param {string} [messageItem.sourceGuildId] - Source guild ID (for safety check)
+     * @param {string} [messageItem.targetGuildId] - Target guild ID (for safety check)
+     * @param {object} messageItem.minecraftManager - Minecraft manager instance
+     * 
+     * @example
+     * // Called by queue processor
+     * await this.deliverQueuedMessage(messageItem);
      */
     async deliverQueuedMessage(messageItem) {
         try {
@@ -729,8 +1131,20 @@ class InterGuildManager {
 
     /**
      * Check if a guild is rate limited
+     * 
+     * Determines if guild has exceeded rate limit based on recent message timestamps.
+     * Rate limit disabled if limit is 0 or negative.
+     * 
+     * Default rate limit: 2 messages per 10 seconds
+     * 
      * @param {string} guildId - Guild ID to check
-     * @returns {boolean} Whether guild is rate limited
+     * @returns {boolean} True if guild is rate limited
+     * 
+     * @example
+     * if (manager.isRateLimited(guildId)) {
+     *   logger.debug("Guild is rate limited");
+     *   return;
+     * }
      */
     isRateLimited(guildId) {
         if (!this.rateLimit || this.rateLimit.limit <= 0) {
@@ -749,7 +1163,15 @@ class InterGuildManager {
 
     /**
      * Update rate limiting for a guild
-     * @param {string} guildId - Guild ID
+     * 
+     * Records current timestamp for guild and removes old timestamps outside the
+     * rate limit window. Called after successfully processing a message.
+     * 
+     * @param {string} guildId - Guild ID to update
+     * 
+     * @example
+     * // Called after message processing
+     * this.updateRateLimit(sourceGuildConfig.id);
      */
     updateRateLimit(guildId) {
         if (!this.rateLimit || this.rateLimit.limit <= 0) {
@@ -770,8 +1192,17 @@ class InterGuildManager {
 
     /**
      * Check if an event type should be shared between guilds
-     * @param {string} eventType - Event type
-     * @returns {boolean} Whether event should be shared
+     * 
+     * Determines if event type is in the shareableEvents configuration list.
+     * Default shareable events: welcome, disconnect, kick, promote, demote, level, motd
+     * 
+     * @param {string} eventType - Event type to check
+     * @returns {boolean} True if event should be shared
+     * 
+     * @example
+     * if (manager.shouldShareEvent('promote')) {
+     *   // Process event for inter-guild sharing
+     * }
      */
     shouldShareEvent(eventType) {
         const shareableEvents = this.interGuildConfig.shareableEvents || [
@@ -783,6 +1214,13 @@ class InterGuildManager {
 
     /**
      * Stop the queue processor
+     * 
+     * Stops the queue processing loop. Queued messages will remain in queue
+     * and can be processed again if processor is restarted.
+     * 
+     * @example
+     * // During shutdown
+     * manager.stopQueueProcessor();
      */
     stopQueueProcessor() {
         this.isProcessingQueue = false;
@@ -790,7 +1228,20 @@ class InterGuildManager {
 
     /**
      * Update configuration
-     * @param {object} newConfig - New configuration
+     * 
+     * Dynamically updates inter-guild configuration and propagates relevant
+     * changes to message formatter. Allows runtime configuration changes.
+     * 
+     * @param {object} newConfig - New configuration options to merge
+     * @param {boolean} [newConfig.enabled] - Enable/disable inter-guild
+     * @param {boolean} [newConfig.showTags] - Update tag display
+     * @param {boolean} [newConfig.showSourceTag] - Update source tag prefix
+     * 
+     * @example
+     * manager.updateConfig({
+     *   showTags: true,
+     *   officerToOfficerChat: true
+     * });
      */
     updateConfig(newConfig) {
         this.interGuildConfig = { ...this.interGuildConfig, ...newConfig };
@@ -808,6 +1259,11 @@ class InterGuildManager {
 
     /**
      * Clear rate limiter
+     * 
+     * Clears all rate limiting data. Useful for testing or administrative resets.
+     * 
+     * @example
+     * manager.clearRateLimit();
      */
     clearRateLimit() {
         this.rateLimiter.clear();
@@ -816,6 +1272,11 @@ class InterGuildManager {
 
     /**
      * Clear message queue
+     * 
+     * Removes all pending messages from delivery queue. Messages will be lost.
+     * 
+     * @example
+     * manager.clearQueue();
      */
     clearQueue() {
         this.messageQueue.length = 0;
@@ -824,6 +1285,12 @@ class InterGuildManager {
 
     /**
      * Clear anti-loop data
+     * 
+     * Clears message hashes and message history used for anti-loop detection.
+     * Use with caution as this removes duplicate protection temporarily.
+     * 
+     * @example
+     * manager.clearAntiLoopData();
      */
     clearAntiLoopData() {
         this.messageHashes.clear();
@@ -833,8 +1300,14 @@ class InterGuildManager {
 
     /**
      * Wait utility function
+     * 
+     * Simple async delay utility for queue processing and retry logic.
+     * 
      * @param {number} ms - Milliseconds to wait
      * @returns {Promise} Promise that resolves after the delay
+     * 
+     * @example
+     * await this.wait(1000); // Wait 1 second
      */
     wait(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
