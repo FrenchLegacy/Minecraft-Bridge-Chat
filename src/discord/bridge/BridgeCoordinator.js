@@ -1,17 +1,77 @@
+/**
+ * Bridge Coordinator - Bidirectional Message Routing Between Minecraft and Discord
+ * 
+ * This class coordinates all message and event bridging between Minecraft and Discord,
+ * acting as the central hub for bidirectional communication. It handles routing,
+ * formatting, delivery tracking, and error management for all types of content
+ * flowing between the two platforms.
+ * 
+ * The coordinator provides:
+ * - Bidirectional message bridging (Minecraft ↔ Discord)
+ * - Guild event routing and logging with double-logging prevention
+ * - Connection status tracking and notifications
+ * - Message formatting and transformation between platforms
+ * - Delivery tracking with success/failure reporting
+ * - Intelligent routing configuration
+ * - Error handling with user feedback
+ * - Event log system with Discord embeds
+ * - UUID fetching and player identification
+ * 
+ * Routing capabilities:
+ * - Minecraft to Discord: Guild chat, officer chat, events, system messages, connections
+ * - Discord to Minecraft: Channel messages routed to appropriate guild/officer chat
+ * - Event logging: Automatic Discord channel logging based on event type
+ * - Command response detection: Prevents duplicate logging when commands are active
+ * 
+ * Message flow architecture:
+ * 1. Minecraft → Discord: Messages/events received → Guild config lookup → Format → Send to Discord
+ * 2. Discord → Minecraft: Messages received → Validate → Format → Send to all connected guilds
+ * 3. Event logging: Minecraft events → Check active listeners → Send to log channels if no listener
+ * 
+ * Double-logging prevention:
+ * The coordinator intelligently checks for active CommandResponseListener instances to avoid
+ * logging events that will be displayed in command responses, preventing duplicate Discord messages.
+ * 
+ * @author Fabien83560
+ * @version 1.0.0
+ * @license ISC
+ */
+
 // Specific Imports
 const BridgeLocator = require("../../bridgeLocator.js");
 const logger = require("../../shared/logger");
 
 const CommandResponseListener = require("../client/handlers/CommandResponseListener.js");
 
+/**
+ * BridgeCoordinator - Coordinate bidirectional message bridging
+ * 
+ * Central coordinator class that manages all communication between Minecraft and Discord,
+ * including message routing, event handling, and delivery tracking.
+ * 
+ * @class
+ */
 class BridgeCoordinator {
+    /**
+     * Create a new BridgeCoordinator instance
+     * 
+     * Initializes the coordinator with configuration and sets up routing rules.
+     * Manager references are set later via initialize() method to avoid circular dependencies.
+     * 
+     * Default routing configuration:
+     * - guildChatToDiscord: true
+     * - officerChatToDiscord: true
+     * - eventsToDiscord: true
+     * - discordToMinecraft: true
+     * - systemMessagesToDiscord: true
+     */
     constructor() {
         const mainBridge = BridgeLocator.getInstance();
         this.config = mainBridge.config;
 
         this.bridgeConfig = this.config.get('bridge');
         
-        // References to managers
+        // References to managers (set via initialize())
         this.discordManager = null;
         this.minecraftManager = null;
 
@@ -29,8 +89,17 @@ class BridgeCoordinator {
 
     /**
      * Initialize coordinator with manager references
+     * 
+     * Sets up the coordinator with Discord and Minecraft manager instances and
+     * establishes bidirectional event listeners for message routing. This method
+     * must be called after both managers are instantiated to complete the bridge setup.
+     * 
      * @param {object} discordManager - Discord manager instance
      * @param {object} minecraftManager - Minecraft manager instance
+     * 
+     * @example
+     * const coordinator = new BridgeCoordinator();
+     * coordinator.initialize(discordManager, minecraftManager);
      */
     initialize(discordManager, minecraftManager) {
         logger.debug('[BRIDGE] BridgeCoordinator.initialize called');
@@ -48,6 +117,17 @@ class BridgeCoordinator {
 
     /**
      * Setup Minecraft to Discord message bridging
+     * 
+     * Establishes event listeners on the Minecraft manager to handle messages,
+     * events, and connection status changes. Routes all Minecraft-originated
+     * content to appropriate Discord handlers.
+     * 
+     * Event listeners registered:
+     * - onMessage: Guild and officer chat messages
+     * - onEvent: Guild events (join, leave, promote, etc.)
+     * - onConnection: Connection status changes
+     * 
+     * @private
      */
     setupMinecraftToDiscordBridge() {
         if (!this.minecraftManager) {
@@ -85,6 +165,15 @@ class BridgeCoordinator {
 
     /**
      * Setup Discord to Minecraft message bridging
+     * 
+     * Establishes event listeners on the Discord manager to handle messages
+     * from Discord channels. Routes Discord messages to appropriate Minecraft
+     * guild chats based on channel configuration.
+     * 
+     * Event listeners registered:
+     * - onMessage: Discord channel messages
+     * 
+     * @private
      */
     setupDiscordToMinecraftBridge() {
         if (!this.discordManager) {
@@ -110,7 +199,25 @@ class BridgeCoordinator {
 
     /**
      * Handle Minecraft message (Minecraft to Discord bridging)
+     * 
+     * Processes Minecraft chat messages (guild or officer) and bridges them to Discord.
+     * Validates Discord connection status and guild configuration before sending.
+     * 
+     * @async
      * @param {object} messageData - Minecraft message data
+     * @param {string} messageData.guildId - Guild ID where message originated
+     * @param {string} messageData.username - Username of message sender
+     * @param {string} messageData.message - Message content
+     * @param {string} messageData.chatType - Chat type ('guild' or 'officer')
+     * 
+     * @example
+     * // Internal usage when Minecraft message is received
+     * await coordinator.handleMinecraftMessage({
+     *   guildId: "guild123",
+     *   username: "Player123",
+     *   message: "Hello world!",
+     *   chatType: "guild"
+     * });
      */
     async handleMinecraftMessage(messageData) {
         try {
@@ -142,8 +249,37 @@ class BridgeCoordinator {
     }
 
     /**
-     * Handle Minecraft guild event (UPDATED with double-logging prevention)
+     * Handle Minecraft guild event (with double-logging prevention)
+     * 
+     * Processes Minecraft guild events and routes them to Discord. Implements smart
+     * double-logging prevention by checking for active CommandResponseListener instances.
+     * If a Discord command is actively listening for this event, skips the automatic
+     * log to prevent duplicate messages.
+     * 
+     * Event flow:
+     * 1. Send event to Discord chat channels (always)
+     * 2. Check for active command listeners
+     * 3. If no listener: Send to log channels
+     * 4. If listener exists: Skip log (command response will handle it)
+     * 
+     * @async
      * @param {object} eventData - Parsed guild event data
+     * @param {string} eventData.guildId - Guild ID where event occurred
+     * @param {string} eventData.type - Event type (join, leave, promote, demote, etc.)
+     * @param {string} [eventData.username] - Username involved in event
+     * @param {string} [eventData.fromRank] - Previous rank (promote/demote)
+     * @param {string} [eventData.toRank] - New rank (promote/demote)
+     * @param {string} [eventData.raw] - Raw Minecraft message
+     * 
+     * @example
+     * // Internal usage when guild event is detected
+     * await coordinator.handleMinecraftEvent({
+     *   guildId: "guild123",
+     *   type: "promote",
+     *   username: "Player123",
+     *   fromRank: "Member",
+     *   toRank: "Officer"
+     * });
      */
     async handleMinecraftEvent(eventData) {
         try {
@@ -219,7 +355,23 @@ class BridgeCoordinator {
 
     /**
      * Handle Minecraft connection events
+     * 
+     * Processes bot connection status changes (connected, disconnected, reconnected)
+     * and sends notifications to Discord status channels.
+     * 
+     * @async
      * @param {object} connectionData - Connection event data
+     * @param {string} connectionData.guildId - Guild ID
+     * @param {string} connectionData.type - Connection type (connected, disconnected, reconnected)
+     * @param {object} [connectionData.details] - Additional connection details
+     * 
+     * @example
+     * // Internal usage when connection status changes
+     * await coordinator.handleMinecraftConnection({
+     *   guildId: "guild123",
+     *   type: "connected",
+     *   details: { attempt: 1, connectionTime: "2:30 PM" }
+     * });
      */
     async handleMinecraftConnection(connectionData) {
         try {
@@ -252,7 +404,33 @@ class BridgeCoordinator {
 
     /**
      * Handle Discord message (Discord to Minecraft bridging)
+     * 
+     * Processes Discord channel messages and bridges them to all connected Minecraft guilds.
+     * Implements comprehensive error tracking, delivery confirmation, and user feedback.
+     * Sends messages to appropriate chat type (guild or officer) based on Discord channel type.
+     * 
+     * Success/failure tracking:
+     * - Tracks delivery to each connected guild separately
+     * - Reports partial failures with error reactions
+     * - Provides detailed logging of success/failure counts
+     * 
+     * @async
      * @param {object} messageData - Discord message data
+     * @param {object} messageData.author - Message author information
+     * @param {string} messageData.author.displayName - Display name of author
+     * @param {string} messageData.author.username - Username of author
+     * @param {string} messageData.content - Message content
+     * @param {string} messageData.channelType - Channel type ('chat' or 'staff')
+     * @param {object} messageData.message - Discord.js message object for reactions
+     * 
+     * @example
+     * // Internal usage when Discord message is received
+     * await coordinator.handleDiscordMessage({
+     *   author: { displayName: "User123", username: "user123" },
+     *   content: "Hello from Discord!",
+     *   channelType: "chat",
+     *   message: discordMessageObject
+     * });
      */
     async handleDiscordMessage(messageData) {
         let successCount = 0;
@@ -354,10 +532,18 @@ class BridgeCoordinator {
     }
 
     /**
-     * Get appropriate log channel for event type
-     * @param {string} eventType - Type of event
-     * @param {object} logChannels - Log channels configuration
-     * @returns {string} Channel ID to use
+     * Determine chat type from Discord channel type
+     * 
+     * Maps Discord channel types to Minecraft chat types. Used to route Discord
+     * messages to the appropriate Minecraft chat (/gc for guild, /oc for officer).
+     * 
+     * @param {string} channelType - Discord channel type identifier
+     * @returns {string|null} Minecraft chat type ('guild', 'officer', or null if unknown)
+     * 
+     * @example
+     * determineChatTypeFromChannel('chat'); // Returns: 'guild'
+     * determineChatTypeFromChannel('staff'); // Returns: 'officer'
+     * determineChatTypeFromChannel('unknown'); // Returns: null
      */
     determineChatTypeFromChannel(channelType) {
         switch (channelType) {
@@ -372,9 +558,26 @@ class BridgeCoordinator {
 
     /**
      * Format Discord message for Minecraft
+     * 
+     * Formats a Discord message for display in Minecraft guild chat. Adds a
+     * "Discord >" prefix to distinguish bridged messages from native Minecraft chat.
+     * 
+     * Format: `Discord > Username: message content`
+     * 
      * @param {object} messageData - Discord message data
-     * @param {string} chatType - Target chat type (guild/officer)
-     * @returns {string} Formatted message
+     * @param {object} messageData.author - Message author
+     * @param {string} messageData.author.displayName - Display name
+     * @param {string} messageData.author.username - Username fallback
+     * @param {string} messageData.content - Message content
+     * @param {string} chatType - Target chat type (currently not used in formatting)
+     * @returns {string} Formatted message for Minecraft
+     * 
+     * @example
+     * const formatted = formatDiscordMessageForMinecraft({
+     *   author: { displayName: "User123" },
+     *   content: "Hello world!"
+     * }, 'guild');
+     * // Returns: "Discord > User123: Hello world!"
      */
     formatDiscordMessageForMinecraft(messageData, chatType) {
         const username = messageData.author.displayName || messageData.author.username;
@@ -389,9 +592,22 @@ class BridgeCoordinator {
 
     /**
      * Send message to Minecraft guild
-     * @param {string} guildId - Guild ID
-     * @param {string} message - Formatted message
-     * @param {string} chatType - Chat type (guild/officer)
+     * 
+     * Sends a formatted message to a specific Minecraft guild using the appropriate
+     * guild chat command (/gc for guild chat, /oc for officer chat).
+     * 
+     * @async
+     * @param {string} guildId - Guild ID to send message to
+     * @param {string} message - Formatted message to send
+     * @param {string} chatType - Chat type ('guild' or 'officer')
+     * @throws {Error} If message delivery fails
+     * 
+     * @example
+     * await coordinator.sendMessageToMinecraft(
+     *   "guild123",
+     *   "Discord > User: Hello!",
+     *   "guild"
+     * );
      */
     async sendMessageToMinecraft(guildId, message, chatType) {
         try {
@@ -409,8 +625,29 @@ class BridgeCoordinator {
 
     /**
      * Send event log to Discord channel
+     * 
+     * Sends a formatted embed log of a guild event to the appropriate Discord log channel.
+     * Automatically determines the correct channel based on event type and configuration.
+     * Creates a rich embed with event details, player information with UUID, and formatting
+     * matching the command response style.
+     * 
+     * @async
      * @param {object} eventData - Event data from Minecraft
+     * @param {string} eventData.type - Event type (join, leave, promote, demote, etc.)
+     * @param {string} [eventData.username] - Username involved in event
+     * @param {string} [eventData.raw] - Raw Minecraft message
      * @param {object} guildConfig - Guild configuration
+     * @param {string} guildConfig.name - Guild name
+     * 
+     * @example
+     * // Internal usage when event needs logging
+     * await coordinator.sendEventLog({
+     *   type: "promote",
+     *   username: "Player123",
+     *   fromRank: "Member",
+     *   toRank: "Officer",
+     *   raw: "[GUILD] Player123 was promoted to Officer"
+     * }, guildConfig);
      */
     async sendEventLog(eventData, guildConfig) {
         try {
@@ -467,9 +704,34 @@ class BridgeCoordinator {
 
     /**
      * Get appropriate log channel for event type
+     * 
+     * Maps event types to their configured Discord log channels. Falls back to
+     * default channel if no specific channel is configured for an event type.
+     * 
+     * Channel mapping:
+     * - join/invite → invite channel
+     * - leave/kick → kick channel
+     * - promote → promote channel
+     * - demote → demote channel
+     * - setrank → setrank channel
+     * - level/motd/misc → default channel
+     * 
      * @param {string} eventType - Type of event
-     * @param {object} logChannels - Log channels configuration
-     * @returns {string} Channel ID to use
+     * @param {object} logChannels - Log channels configuration object
+     * @param {string} [logChannels.invite] - Invite/join events channel
+     * @param {string} [logChannels.kick] - Kick/leave events channel
+     * @param {string} [logChannels.promote] - Promote events channel
+     * @param {string} [logChannels.demote] - Demote events channel
+     * @param {string} [logChannels.setrank] - Setrank events channel
+     * @param {string} logChannels.default - Default fallback channel
+     * @returns {string} Channel ID to use for logging
+     * 
+     * @example
+     * const channelId = coordinator.getEventLogChannel('promote', {
+     *   promote: "123456789",
+     *   default: "987654321"
+     * });
+     * // Returns: "123456789"
      */
     getEventLogChannel(eventType, logChannels) {
         // Map event types to channel configurations
@@ -491,9 +753,33 @@ class BridgeCoordinator {
 
     /**
      * Create Discord embed for event log (matching command log format)
+     * 
+     * Creates a rich Discord embed for event logging with formatting that matches
+     * command response embeds. Includes guild information, player details with UUID
+     * fetching, and event-specific details.
+     * 
+     * Embed structure:
+     * - Title: "✅ {EventType} Event Detected"
+     * - Color: Green (success)
+     * - Fields: Guild, Target Player (with UUID), Details
+     * - Footer: "🔧 Guild Event System"
+     * 
+     * @async
      * @param {object} eventData - Event data
+     * @param {string} eventData.type - Event type
+     * @param {string} [eventData.username] - Player username
+     * @param {string} [eventData.raw] - Raw event message
      * @param {object} guildConfig - Guild configuration
-     * @returns {EmbedBuilder} Discord embed
+     * @param {string} guildConfig.name - Guild name
+     * @returns {EmbedBuilder} Discord embed ready to send
+     * 
+     * @example
+     * const embed = await coordinator.createEventLogEmbed({
+     *   type: "promote",
+     *   username: "Player123",
+     *   fromRank: "Member",
+     *   toRank: "Officer"
+     * }, guildConfig);
      */
     async createEventLogEmbed(eventData, guildConfig) {
         const { EmbedBuilder } = require('discord.js');
@@ -550,8 +836,28 @@ class BridgeCoordinator {
 
     /**
      * Build event details string (matching command response format)
+     * 
+     * Constructs a formatted details string for event embeds based on event type.
+     * Includes rank changes, levels, reasons, and raw messages when available.
+     * 
      * @param {object} eventData - Event data
-     * @returns {string} Event details
+     * @param {string} eventData.type - Event type
+     * @param {string} [eventData.fromRank] - Previous rank
+     * @param {string} [eventData.toRank] - New rank
+     * @param {string} [eventData.rank] - Rank (for setrank)
+     * @param {number} [eventData.level] - Guild level
+     * @param {string} [eventData.reason] - Kick/leave reason
+     * @param {string} [eventData.raw] - Raw Minecraft message
+     * @returns {string} Formatted event details string
+     * 
+     * @example
+     * const details = coordinator.buildEventDetails({
+     *   type: "promote",
+     *   fromRank: "Member",
+     *   toRank: "Officer",
+     *   raw: "[GUILD] Player was promoted"
+     * });
+     * // Returns: "**Rank Change:** Member → Officer\n**Raw Message:** `[GUILD] Player was promoted`"
      */
     buildEventDetails(eventData) {
         let details = [];
@@ -595,8 +901,17 @@ class BridgeCoordinator {
 
     /**
      * Capitalize first letter of a string
+     * 
+     * Simple utility function to capitalize the first character of a string
+     * for display purposes in embeds and messages.
+     * 
      * @param {string} str - String to capitalize
-     * @returns {string} Capitalized string
+     * @returns {string} String with first letter capitalized, or empty string if input is falsy
+     * 
+     * @example
+     * capitalizeFirst('promote'); // Returns: 'Promote'
+     * capitalizeFirst('guild_join'); // Returns: 'Guild_join'
+     * capitalizeFirst(''); // Returns: ''
      */
     capitalizeFirst(str) {
         if (!str) return '';
@@ -605,8 +920,18 @@ class BridgeCoordinator {
 
     /**
      * Get guild configuration by guild ID
-     * @param {string} guildId - Guild ID
-     * @returns {object|null} Guild configuration
+     * 
+     * Retrieves guild configuration from the config system by guild ID.
+     * Returns null if guild is not found or if an error occurs.
+     * 
+     * @param {string} guildId - Guild ID to look up
+     * @returns {object|null} Guild configuration object or null if not found
+     * 
+     * @example
+     * const guildConfig = coordinator.getGuildConfig("guild123");
+     * if (guildConfig) {
+     *   console.log(`Found guild: ${guildConfig.name}`);
+     * }
      */
     getGuildConfig(guildId) {
         try {
@@ -619,7 +944,18 @@ class BridgeCoordinator {
 
     /**
      * Add error reaction to Discord message
+     * 
+     * Adds a ❌ reaction to a Discord message to indicate an error occurred.
+     * Used for user feedback when message bridging fails. Fails silently if
+     * reaction cannot be added.
+     * 
+     * @async
      * @param {object} messageData - Discord message data
+     * @param {object} messageData.message - Discord.js message object
+     * 
+     * @example
+     * // Internal usage when bridge error occurs
+     * await coordinator.addErrorReaction(messageData);
      */
     async addErrorReaction(messageData) {
         try {
@@ -633,6 +969,19 @@ class BridgeCoordinator {
 
     /**
      * Cleanup all listeners
+     * 
+     * Performs cleanup of all coordinator resources, including command response
+     * listeners, manager references, and routing configuration. Should be called
+     * when shutting down the bridge to ensure clean resource release.
+     * 
+     * Cleanup operations:
+     * - Cleans up CommandResponseListener singleton
+     * - Nullifies manager references
+     * - Resets routing configuration to defaults
+     * 
+     * @example
+     * // During shutdown
+     * coordinator.cleanup();
      */
     cleanup() {
         try {
@@ -671,14 +1020,46 @@ class BridgeCoordinator {
 
     /**
      * Get current routing configuration
-     * @returns {object} Current routing configuration
+     * 
+     * Returns a copy of the current routing configuration object. This is
+     * useful for checking which routing paths are currently enabled.
+     * 
+     * @returns {object} Current routing configuration (copy)
+     * @returns {boolean} return.guildChatToDiscord - Guild chat bridging enabled
+     * @returns {boolean} return.officerChatToDiscord - Officer chat bridging enabled
+     * @returns {boolean} return.eventsToDiscord - Event bridging enabled
+     * @returns {boolean} return.discordToMinecraft - Discord to MC bridging enabled
+     * @returns {boolean} return.systemMessagesToDiscord - System messages bridging enabled
+     * 
+     * @example
+     * const config = coordinator.getRoutingConfig();
+     * if (config.discordToMinecraft) {
+     *   console.log("Discord to Minecraft bridging is enabled");
+     * }
      */
     getRoutingConfig() {
         return { ...this.routingConfig };
     }
 }
 
-// Function to fetch Minecraft UUID
+/**
+ * Fetch Minecraft UUID from Mojang API
+ * 
+ * External utility function that fetches a player's UUID from the Mojang API
+ * using their username. Returns the UUID without dashes. Used for player
+ * identification in event logs.
+ * 
+ * @async
+ * @param {string} username - Minecraft username to look up
+ * @returns {Promise<string|null>} UUID without dashes, or null if not found/error
+ * 
+ * @example
+ * const uuid = await fetchMinecraftUUID("Player123");
+ * if (uuid) {
+ *   console.log(`UUID: ${uuid}`);
+ *   // Format with dashes: uuid.replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5')
+ * }
+ */
 async function fetchMinecraftUUID(username) {
     try {
         const response = await fetch(`https://api.mojang.com/users/profiles/minecraft/${username}`);

@@ -1,3 +1,36 @@
+/**
+ * Slash Command Handler - Discord Slash Command Registration and Execution
+ * 
+ * This file handles the complete lifecycle of Discord slash commands including loading,
+ * registration with Discord's API, permission validation, and command execution.
+ * It supports recursive command loading from directories and provides autocomplete
+ * functionality for commands that require it.
+ * 
+ * The handler provides:
+ * - Recursive command loading from directories and subdirectories
+ * - Global slash command registration with Discord API
+ * - Command execution with full context (client, config, bridge)
+ * - Permission validation (admin, moderator roles)
+ * - Autocomplete handling for dynamic command options
+ * - Guild name and rank autocomplete for guild-related commands
+ * - Command hot-reloading capabilities
+ * - Interaction event handling and routing
+ * 
+ * Permission System:
+ * - Admin: Requires configured admin roles or Administrator permission
+ * - Moderator: Requires admin/mod roles or ManageMessages permission
+ * - Commands can specify required permission level for access control
+ * 
+ * Autocomplete Features:
+ * - Guild name suggestions based on enabled guilds in configuration
+ * - Dynamic rank suggestions based on selected guild's rank structure
+ * - Custom autocomplete handlers for individual commands
+ * 
+ * @author Fabien83560
+ * @version 1.0.0
+ * @license ISC
+ */
+
 // Globals Imports
 const { readdirSync, statSync } = require('fs');
 const { join } = require('path');
@@ -8,7 +41,20 @@ const { EventEmitter } = require('events');
 const logger = require('../../../shared/logger');
 const BridgeLocator = require('../../../bridgeLocator.js');
 
+/**
+ * SlashCommandHandler - Manages Discord slash commands
+ * 
+ * Extends EventEmitter to emit command execution events.
+ * Handles command loading, registration, execution, permissions, and autocomplete.
+ * 
+ * @class
+ * @extends EventEmitter
+ */
 class SlashCommandHandler extends EventEmitter {
+    /**
+     * Create a new SlashCommandHandler instance
+     * Initializes configuration, command storage, and permission settings
+     */
     constructor() {
         super();
 
@@ -30,9 +76,18 @@ class SlashCommandHandler extends EventEmitter {
         logger.debug('SlashCommandHandler initialized');
     }
 
+    // ==================== INITIALIZATION ====================
+
     /**
      * Initialize the slash command handler
+     * 
+     * Sets up the handler with a Discord client, loads all commands,
+     * registers them with Discord's API, and sets up interaction listeners.
+     * 
+     * @async
      * @param {Client} client - Discord client instance
+     * @throws {Error} If client is not provided
+     * @throws {Error} If initialization fails
      */
     async initialize(client) {
         if (!client) {
@@ -61,8 +116,16 @@ class SlashCommandHandler extends EventEmitter {
         }
     }
 
+    // ==================== COMMAND LOADING ====================
+
     /**
      * Load all commands from the commands directory and subdirectories
+     * 
+     * Scans the commands directory and loads all command files.
+     * Creates the directory if it doesn't exist.
+     * 
+     * @async
+     * @private
      */
     async loadCommands() {
         const commandsPath = join(__dirname, '../commands');
@@ -84,6 +147,12 @@ class SlashCommandHandler extends EventEmitter {
 
     /**
      * Recursively load commands from a directory
+     * 
+     * Scans a directory for JavaScript files and loads them as commands.
+     * Skips subdirectories as they contain subcommand modules rather than full commands.
+     * 
+     * @async
+     * @private
      * @param {string} dirPath - Directory path to scan
      * @param {boolean} isSubdirectory - Whether this is a subdirectory (default: false)
      */
@@ -98,7 +167,6 @@ class SlashCommandHandler extends EventEmitter {
                 if (itemStats.isDirectory()) {
                     // Skip subdirectories for command loading
                     // Subdirectories contain subcommand modules, not full commands
-                    logger.debug(`Skipping subdirectory: ${item} (contains subcommand modules)`);
                     continue;
                 } else if (item.endsWith('.js')) {
                     // Only load command files from the main commands directory
@@ -114,6 +182,12 @@ class SlashCommandHandler extends EventEmitter {
 
     /**
      * Load a single command file
+     * 
+     * Loads a command file, validates its structure, and adds it to the command map.
+     * Clears the require cache to enable hot reloading.
+     * 
+     * @async
+     * @private
      * @param {string} filePath - Path to the command file
      * @param {string} fileName - Name of the file
      */
@@ -142,8 +216,18 @@ class SlashCommandHandler extends EventEmitter {
         }
     }
 
+    // ==================== COMMAND REGISTRATION ====================
+
     /**
      * Register slash commands with Discord API
+     * 
+     * Registers all loaded commands globally with Discord's API.
+     * Commands will be available across all guilds where the bot is installed.
+     * 
+     * @async
+     * @private
+     * @throws {Error} If client ID is not configured
+     * @throws {Error} If registration with Discord fails
      */
     async registerCommands() {
         if (this.commandsData.length === 0) {
@@ -175,8 +259,16 @@ class SlashCommandHandler extends EventEmitter {
         }
     }
 
+    // ==================== EVENT HANDLING ====================
+
     /**
      * Setup interaction listener for slash commands and autocomplete
+     * 
+     * Registers event listeners for Discord interactions including
+     * slash command execution and autocomplete requests. Handles errors
+     * gracefully with appropriate user feedback.
+     * 
+     * @private
      */
     setupInteractionListener() {
         this.client.on(Events.InteractionCreate, async (interaction) => {
@@ -234,8 +326,17 @@ class SlashCommandHandler extends EventEmitter {
         });
     }
 
+    // ==================== AUTOCOMPLETE SYSTEM ====================
+
     /**
      * Handle autocomplete interactions
+     * 
+     * Routes autocomplete requests to the appropriate handler based on the option name.
+     * Supports guild name and rank autocomplete, as well as custom command autocomplete.
+     * Provides safe fallback with empty response on errors.
+     * 
+     * @async
+     * @private
      * @param {AutocompleteInteraction} interaction - Discord autocomplete interaction
      */
     async handleAutocomplete(interaction) {
@@ -281,6 +382,13 @@ class SlashCommandHandler extends EventEmitter {
 
     /**
      * Handle guild name autocomplete
+     * 
+     * Provides autocomplete suggestions for guild names based on enabled guilds
+     * in the configuration. Filters results based on user input and limits to
+     * Discord's maximum of 25 choices.
+     * 
+     * @async
+     * @private
      * @param {AutocompleteInteraction} interaction - Discord autocomplete interaction
      * @param {string} query - Current input value
      */
@@ -332,6 +440,13 @@ class SlashCommandHandler extends EventEmitter {
 
     /**
      * Handle rank autocomplete for setrank command
+     * 
+     * Provides autocomplete suggestions for guild ranks based on the selected guild's
+     * rank structure. Requires a guild to be selected first. Filters results based
+     * on user input and returns ranks in reverse order (highest to lowest).
+     * 
+     * @async
+     * @private
      * @param {AutocompleteInteraction} interaction - Discord autocomplete interaction
      * @param {string} query - Current input value
      */
@@ -395,8 +510,14 @@ class SlashCommandHandler extends EventEmitter {
 
     /**
      * Get valid ranks for a guild dynamically from configuration
+     * 
+     * Retrieves the rank structure for a specific guild from the configuration.
+     * Returns ranks in reverse order (highest to lowest) for intuitive selection.
+     * Only returns ranks for enabled guilds.
+     * 
+     * @private
      * @param {string} guildName - Name of the guild
-     * @returns {Array<string>} - Array of valid ranks
+     * @returns {Array<string>} Array of valid ranks (reversed order)
      */
     getValidRanksForGuild(guildName) {
         try {
@@ -422,10 +543,25 @@ class SlashCommandHandler extends EventEmitter {
         }
     }
 
+    // ==================== PERMISSION SYSTEM ====================
+
     /**
      * Check if member has required permission
+     * 
+     * Validates if a guild member has the required permission level.
+     * Supports 'admin' and 'moderator' permission levels.
+     * 
+     * Admin level checks:
+     * - Member has a role in configured adminRoles (by ID or name)
+     * - Member has Administrator permission
+     * 
+     * Moderator level checks:
+     * - Member has admin permissions (inherits from admin)
+     * - Member has a role in configured modRoles (by ID or name)
+     * - Member has ManageMessages permission
+     * 
      * @param {GuildMember} member - Discord guild member
-     * @param {string} requiredPermission - Required permission level
+     * @param {string} requiredPermission - Required permission level ('admin', 'mod', 'moderator')
      * @returns {boolean} Has permission
      */
     hasPermission(member, requiredPermission) {
@@ -449,8 +585,17 @@ class SlashCommandHandler extends EventEmitter {
         }
     }
 
+    // ==================== COMMAND MANAGEMENT ====================
+
     /**
      * Reload all commands
+     * 
+     * Clears the current command cache and reloads all commands from disk.
+     * Re-registers commands with Discord's API after reload.
+     * Useful for applying command changes without restarting the bot.
+     * 
+     * @async
+     * @returns {Promise<object>} Result object with success status and command count
      */
     async reloadCommands() {
         try {
@@ -470,8 +615,13 @@ class SlashCommandHandler extends EventEmitter {
         }
     }
 
+    // ==================== CLEANUP ====================
+
     /**
      * Cleanup resources
+     * 
+     * Clears all command data and removes event listeners.
+     * Should be called before disposing of the handler instance.
      */
     cleanup() {
         this.commands.clear();

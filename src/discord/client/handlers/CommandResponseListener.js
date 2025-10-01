@@ -1,3 +1,46 @@
+/**
+ * Command Response Listener - Discord Command Response Tracking System
+ * 
+ * This file handles tracking and validation of Discord slash commands executed in Minecraft.
+ * It creates listeners that monitor Minecraft chat and events for command responses, validates
+ * success/error patterns, and provides feedback to Discord users. The system prevents duplicate
+ * logging of events and ensures accurate command result tracking.
+ * 
+ * The listener provides:
+ * - Singleton pattern for centralized command response tracking
+ * - Active listener management for pending Discord commands
+ * - Pattern-based response validation (success/error detection)
+ * - Event matching between Minecraft events and Discord commands
+ * - Anti-duplicate logging with recently resolved listener tracking
+ * - Automatic timeout handling for unresponsive commands
+ * - Discord logging integration for command execution results
+ * - Raw message interception from Minecraft bot connections
+ * - UUID fetching for command target players
+ * 
+ * Response Pattern System:
+ * - Configurable regex patterns for each command type
+ * - Success pattern matching for command confirmation
+ * - Error pattern matching for command failure detection
+ * - Target player validation in responses
+ * - Special handling for global commands (mute/unmute everyone)
+ * 
+ * Event Matching:
+ * - Maps Minecraft events to Discord command types
+ * - Supports event types: promote, demote, kick, join, leave, mute, unmute
+ * - Handles setrank command generating promote/demote events
+ * - Guild-specific event filtering
+ * - Player-specific event matching
+ * 
+ * Anti-Duplicate System:
+ * - Tracks recently resolved listeners for 5 seconds
+ * - Prevents double logging of the same event
+ * - Automatic cleanup of old resolved listeners
+ * 
+ * @author Fabien83560
+ * @version 1.0.0
+ * @license ISC
+ */
+
 // Globals Imports
 const EventEmitter = require('events');
 
@@ -6,7 +49,22 @@ const BridgeLocator = require("../../../bridgeLocator.js");
 const { getPatternLoader } = require("../../../config/PatternLoader.js");
 const logger = require("../../../shared/logger");
 
+/**
+ * CommandResponseListener - Tracks Discord command responses from Minecraft
+ * 
+ * Implements singleton pattern to provide centralized command response tracking.
+ * Extends EventEmitter to emit command result events for external handling.
+ * 
+ * @class
+ * @extends EventEmitter
+ */
 class CommandResponseListener extends EventEmitter {
+    /**
+     * Create a new CommandResponseListener instance
+     * 
+     * Implements singleton pattern - returns existing instance if already created.
+     * Initializes listener tracking, response patterns, and anti-duplicate system.
+     */
     constructor() {
         super();
         
@@ -35,8 +93,15 @@ class CommandResponseListener extends EventEmitter {
         logger.debug('CommandResponseListener initialized with singleton pattern');
     }
 
+    // ==================== SINGLETON ACCESS ====================
+
     /**
      * Get singleton instance
+     * 
+     * Returns the singleton instance of CommandResponseListener.
+     * Creates new instance if none exists.
+     * 
+     * @static
      * @returns {CommandResponseListener} Singleton instance
      */
     static getInstance() {
@@ -46,32 +111,35 @@ class CommandResponseListener extends EventEmitter {
         return CommandResponseListener.instance;
     }
 
+    // ==================== EVENT MATCHING SYSTEM ====================
+
     /**
      * Static method to check if there's an active listener for a specific event
+     * 
+     * Used by BridgeCoordinator to determine if an event should be suppressed from
+     * normal logging because it's being tracked by a Discord command listener.
+     * Checks both active listeners and recently resolved listeners to prevent
+     * duplicate logging within the timeout window.
+     * 
+     * @static
      * @param {object} eventData - Event data from Minecraft
+     * @param {string} eventData.type - Event type (promote, demote, kick, etc.)
+     * @param {string} eventData.username - Player username involved in event
+     * @param {string} eventData.guildId - Guild ID where event occurred
      * @returns {boolean} True if there's an active listener that will handle this event
      */
     static hasActiveListenerForEvent(eventData) {
         try {
-            logger.debug(`[CMD-LISTENER] ================================`);
-            logger.debug(`[CMD-LISTENER] hasActiveListenerForEvent CALLED`);
-            logger.debug(`[CMD-LISTENER] EventData: ${JSON.stringify(eventData)}`);
-            logger.debug(`[CMD-LISTENER] ================================`);
-            
             // Get singleton instance
             const instance = CommandResponseListener.getInstance();
-            logger.debug(`[CMD-LISTENER] Singleton instance retrieved: ${!!instance}`);
             
             if (!instance) {
-                logger.debug('[CMD-LISTENER] No singleton instance available');
+                logger.warning('[CMD-LISTENER] No singleton instance available');
                 return false;
             }
 
             const activeListeners = instance.getActiveListeners();
             const recentlyResolved = instance.recentlyResolvedListeners;
-            
-            logger.debug(`[CMD-LISTENER] Active listeners map size: ${activeListeners.size}`);
-            logger.debug(`[CMD-LISTENER] Recently resolved listeners map size: ${recentlyResolved.size}`);
             
             // Clean up old recently resolved listeners
             instance.cleanupOldResolvedListeners();
@@ -80,25 +148,12 @@ class CommandResponseListener extends EventEmitter {
             let listenerIndex = 0;
             for (const [listenerId, listener] of activeListeners) {
                 listenerIndex++;
-                logger.debug(`[CMD-LISTENER] Active Listener ${listenerIndex}/${activeListeners.size}:`);
-                logger.debug(`[CMD-LISTENER]   - ID: ${listenerId}`);
-                logger.debug(`[CMD-LISTENER]   - Guild: ${listener.guildId}`);
-                logger.debug(`[CMD-LISTENER]   - Command Type: ${listener.commandType}`);
-                logger.debug(`[CMD-LISTENER]   - Target Player: ${listener.targetPlayer}`);
-                logger.debug(`[CMD-LISTENER]   - Resolved: ${listener.resolved}`);
             }
             
             // Log recently resolved listeners
             listenerIndex = 0;
             for (const [listenerId, resolvedData] of recentlyResolved) {
                 listenerIndex++;
-                logger.debug(`[CMD-LISTENER] Recently Resolved Listener ${listenerIndex}/${recentlyResolved.size}:`);
-                logger.debug(`[CMD-LISTENER]   - ID: ${listenerId}`);
-                logger.debug(`[CMD-LISTENER]   - Guild: ${resolvedData.guildId}`);
-                logger.debug(`[CMD-LISTENER]   - Command Type: ${resolvedData.commandType}`);
-                logger.debug(`[CMD-LISTENER]   - Target Player: ${resolvedData.targetPlayer}`);
-                logger.debug(`[CMD-LISTENER]   - Resolved At: ${new Date(resolvedData.resolvedAt).toISOString()}`);
-                logger.debug(`[CMD-LISTENER]   - Age: ${Date.now() - resolvedData.resolvedAt}ms`);
             }
             
             logger.debug(`[CMD-LISTENER] Checking ${activeListeners.size} active + ${recentlyResolved.size} recently resolved listeners for event: ${eventData.type} - ${eventData.username || 'system'} in guild ${eventData.guildId}`);
@@ -117,70 +172,56 @@ class CommandResponseListener extends EventEmitter {
                 }
             }
             
-            logger.debug(`[CMD-LISTENER] ================================`);
-            logger.debug(`[CMD-LISTENER] NO MATCH FOUND - Event will be logged`);
-            logger.debug(`[CMD-LISTENER] ================================`);
             return false;
             
         } catch (error) {
-            logger.debug('[CMD-LISTENER] Error checking for active command listeners:', error);
+            logger.error('[CMD-LISTENER] Error checking for active command listeners:', error);
             return false;
         }
     }
 
     /**
      * Check if a listener matches an event
+     * 
+     * Validates if a listener (active or recently resolved) should handle a specific event.
+     * Performs guild matching, resolution status check, event type matching, and player matching.
+     * 
      * @param {string} listenerId - Listener ID
      * @param {object} listenerData - Listener data (active or resolved)
-     * @param {object} eventData - Event data
+     * @param {object} eventData - Event data from Minecraft
      * @param {string} listenerType - "ACTIVE" or "RECENTLY_RESOLVED"
      * @returns {boolean} True if matches
      */
     checkListenerMatch(listenerId, listenerData, eventData, listenerType) {
-        logger.debug(`[CMD-LISTENER] --------------------------------`);
         logger.debug(`[CMD-LISTENER] Analyzing ${listenerType} listener ${listenerId}`);
         
         // Skip if different guild
         if (listenerData.guildId !== eventData.guildId) {
-            logger.debug(`[CMD-LISTENER]   ❌ Different guild: ${listenerData.guildId} vs ${eventData.guildId}`);
             return false;
         }
-        logger.debug(`[CMD-LISTENER]   ✅ Guild matches: ${listenerData.guildId}`);
         
         // For active listeners, skip if already resolved
         if (listenerType === "ACTIVE" && listenerData.resolved) {
-            logger.debug(`[CMD-LISTENER]   ❌ Already resolved`);
             return false;
-        }
-        if (listenerType === "ACTIVE") {
-            logger.debug(`[CMD-LISTENER]   ✅ Not resolved yet`);
         }
         
         // Check if this event type matches the command type
         const isMatchingEvent = this.isEventMatchingCommand(eventData, listenerData);
-        logger.debug(`[CMD-LISTENER]   Event matching check: ${isMatchingEvent} (event: ${eventData.type}, command: ${listenerData.commandType})`);
         
-        if (isMatchingEvent) {
-            logger.debug(`[CMD-LISTENER]   ✅ Event type matches command type`);
-            
+        if (isMatchingEvent) {            
             // Check if the target player matches (if applicable)
             if (eventData.username && listenerData.targetPlayer) {
                 const eventPlayerLower = eventData.username.toLowerCase();
                 const targetPlayerLower = listenerData.targetPlayer.toLowerCase();
                 
-                logger.debug(`[CMD-LISTENER]   Comparing players: "${eventPlayerLower}" vs "${targetPlayerLower}"`);
                 
                 if (eventPlayerLower === targetPlayerLower) {
-                    logger.debug(`[CMD-LISTENER]   ✅✅✅ PERFECT MATCH FOUND (${listenerType})! ✅✅✅`);
-                    logger.debug(`[CMD-LISTENER]   Found ${listenerType} Discord command listener for ${eventData.type} event (${eventData.username}) - listener ${listenerId}`);
                     return true;
                 } else {
                     logger.debug(`[CMD-LISTENER]   ❌ Player mismatch: "${eventPlayerLower}" vs "${targetPlayerLower}"`);
                 }
             } else if (!eventData.username || !listenerData.targetPlayer) {
                 // For events without specific players or commands without targets
-                logger.debug(`[CMD-LISTENER]   ✅✅✅ SYSTEM EVENT MATCH FOUND (${listenerType})! ✅✅✅`);
-                logger.debug(`[CMD-LISTENER]   Found ${listenerType} Discord command listener for ${eventData.type} event (system) - listener ${listenerId}`);
                 return true;
             } else {
                 logger.debug(`[CMD-LISTENER]   ❌ One has player, other doesn't - event: ${!!eventData.username}, listener: ${!!listenerData.targetPlayer}`);
@@ -194,6 +235,11 @@ class CommandResponseListener extends EventEmitter {
 
     /**
      * Clean up old recently resolved listeners
+     * 
+     * Removes resolved listeners that have exceeded the timeout window.
+     * Prevents memory leaks and ensures the recently resolved map stays current.
+     * 
+     * @private
      */
     cleanupOldResolvedListeners() {
         const now = Date.now();
@@ -207,13 +253,25 @@ class CommandResponseListener extends EventEmitter {
         
         for (const listenerId of toRemove) {
             this.recentlyResolvedListeners.delete(listenerId);
-            logger.debug(`[CMD-LISTENER] Cleaned up old resolved listener: ${listenerId}`);
         }
     }
 
     /**
      * Check if an event type matches a command type
-     * @param {object} eventData - Event data
+     * 
+     * Maps Minecraft event types to Discord command types.
+     * Handles special cases like setrank generating promote/demote events.
+     * 
+     * Event to Command Mapping:
+     * - promote → promote, setrank
+     * - demote → demote, setrank
+     * - kick → kick
+     * - join → invite
+     * - leave → kick (leave events can be caused by kicks)
+     * - mute → mute
+     * - unmute → unmute
+     * 
+     * @param {object} eventData - Event data from Minecraft
      * @param {object} listener - Command listener
      * @returns {boolean} True if they match
      */
@@ -243,14 +301,23 @@ class CommandResponseListener extends EventEmitter {
 
     /**
      * Get active listeners map (for external access by BridgeCoordinator)
+     * 
      * @returns {Map} Active listeners map
      */
     getActiveListeners() {
         return this.activeListeners;
     }
 
+    // ==================== PATTERN LOADING ====================
+
     /**
      * Load response patterns from configuration
+     * 
+     * Loads and compiles regex patterns for command response detection.
+     * Patterns are loaded from the PatternLoader configuration for the Hypixel server.
+     * Converts JSON pattern strings to RegExp objects with case-insensitive matching.
+     * 
+     * @private
      */
     loadResponsePatterns() {
         try {
@@ -314,11 +381,18 @@ class CommandResponseListener extends EventEmitter {
         }
     }
 
+    // ==================== LISTENER CREATION ====================
+
     /**
      * Create a new command listener
+     * 
+     * Creates a listener that monitors Minecraft chat and events for command responses.
+     * Automatically attaches to Minecraft message system and sets up timeout handling.
+     * 
      * @param {string} guildId - Guild ID to listen to
      * @param {string} commandType - Type of command (invite, kick, etc.)
      * @param {string} targetPlayer - Player being targeted by the command
+     * @param {string} command - Full command string executed
      * @param {number} timeoutMs - Timeout in milliseconds (default: 10000)
      * @param {object} interaction - Discord interaction object (optional)
      * @returns {string} Listener ID
@@ -373,6 +447,11 @@ class CommandResponseListener extends EventEmitter {
 
     /**
      * Attach listener to Minecraft message system
+     * 
+     * Connects the listener to both raw Minecraft bot messages and guild events.
+     * Raw messages bypass normal filtering to ensure command responses are caught.
+     * 
+     * @private
      * @param {object} listener - Listener configuration
      */
     attachToMinecraftMessages(listener) {
@@ -423,8 +502,16 @@ class CommandResponseListener extends EventEmitter {
         }
     }
 
+    // ==================== MESSAGE HANDLING ====================
+
     /**
      * Handle incoming raw Minecraft message (bypasses guild message filtering)
+     * 
+     * Processes raw messages from Minecraft bot to detect command responses.
+     * Applies pattern matching for success and error cases.
+     * Includes special validation logic for mute/unmute commands.
+     * 
+     * @private
      * @param {string} listenerId - Listener ID
      * @param {object} message - Raw message from Minecraft bot
      * @param {string} guildId - Guild ID for context
@@ -531,6 +618,10 @@ class CommandResponseListener extends EventEmitter {
 
     /**
      * Handle incoming Minecraft message
+     * 
+     * Delegates to handleRawMessage for consistency.
+     * 
+     * @private
      * @param {string} listenerId - Listener ID
      * @param {object} messageData - Message data from Minecraft
      */
@@ -542,6 +633,11 @@ class CommandResponseListener extends EventEmitter {
 
     /**
      * Handle incoming Minecraft event
+     * 
+     * Processes guild events (kick, join, promote, demote) that match the listener's
+     * command type and target player. Resolves the listener on successful match.
+     * 
+     * @private
      * @param {string} listenerId - Listener ID
      * @param {object} eventData - Event data from Minecraft
      */
@@ -614,10 +710,17 @@ class CommandResponseListener extends EventEmitter {
         }
     }
 
+    // ==================== LISTENER RESOLUTION ====================
+
     /**
      * Resolve a listener with a result
+     * 
+     * Marks a listener as resolved, cleans up handlers, stores in recently resolved
+     * for anti-duplicate tracking, and emits the result. Sends Discord log on success.
+     * 
+     * @private
      * @param {string} listenerId - Listener ID
-     * @param {object} result - Result object
+     * @param {object} result - Result object with success, message/error, and type
      */
     resolveListener(listenerId, result) {
         const listener = this.activeListeners.get(listenerId);
@@ -693,8 +796,18 @@ class CommandResponseListener extends EventEmitter {
         logger.debug(`Resolved listener ${listenerId} with result: ${JSON.stringify(result)}`);
     }
 
+    // ==================== DISCORD LOGGING ====================
+
     /**
      * Send command log to Discord channel
+     * 
+     * Creates and sends an embed message to Discord logging channel with command
+     * execution details including executor, guild, target player, command, and result.
+     * Fetches Minecraft UUID for target player and formats embed with appropriate
+     * colors and emojis based on success/failure.
+     * 
+     * @async
+     * @private
      * @param {object} listener - Listener configuration
      * @param {object} result - Command result
      */
@@ -834,6 +947,8 @@ class CommandResponseListener extends EventEmitter {
 
     /**
      * Capitalize first letter of a string
+     * 
+     * @private
      * @param {string} str - String to capitalize
      * @returns {string} Capitalized string
      */
@@ -842,9 +957,15 @@ class CommandResponseListener extends EventEmitter {
         return str.charAt(0).toUpperCase() + str.slice(1);
     }
 
+    // ==================== LISTENER MANAGEMENT ====================
+
     /**
      * Cancel a listener
+     * 
+     * Manually cancels an active listener and resolves it with cancelled status.
+     * 
      * @param {string} listenerId - Listener ID
+     * @returns {boolean} True if listener was found and cancelled
      */
     cancelListener(listenerId) {
         const listener = this.activeListeners.get(listenerId);
@@ -864,6 +985,10 @@ class CommandResponseListener extends EventEmitter {
 
     /**
      * Wait for a command result
+     * 
+     * Returns a promise that resolves when the specified listener completes.
+     * Used by command handlers to await command execution results.
+     * 
      * @param {string} listenerId - Listener ID
      * @returns {Promise<object>} Command result
      */
@@ -892,6 +1017,7 @@ class CommandResponseListener extends EventEmitter {
 
     /**
      * Get active listeners count
+     * 
      * @returns {number} Number of active listeners
      */
     getActiveListenersCount() {
@@ -900,7 +1026,11 @@ class CommandResponseListener extends EventEmitter {
 
     /**
      * Get statistics
-     * @returns {object} Statistics
+     * 
+     * Returns comprehensive statistics about listener usage including
+     * active count, breakdown by guild, breakdown by type, and total created.
+     * 
+     * @returns {object} Statistics object
      */
     getStatistics() {
         const listeners = Array.from(this.activeListeners.values());
@@ -919,8 +1049,13 @@ class CommandResponseListener extends EventEmitter {
         };
     }
 
+    // ==================== CLEANUP ====================
+
     /**
      * Cleanup all listeners
+     * 
+     * Cancels all active listeners and removes all event listeners.
+     * Should be called before disposing of the handler instance.
      */
     cleanup() {
         for (const [listenerId] of this.activeListeners) {
@@ -932,7 +1067,18 @@ class CommandResponseListener extends EventEmitter {
     }
 }
 
-// Function to fetch Minecraft UUID
+// ==================== UTILITY FUNCTIONS ====================
+
+/**
+ * Function to fetch Minecraft UUID from Mojang API
+ * 
+ * Retrieves the UUID for a given Minecraft username using Mojang's API.
+ * Used for enhanced Discord logging with player identifiers.
+ * 
+ * @async
+ * @param {string} username - Minecraft username
+ * @returns {Promise<string|null>} UUID if found, null otherwise
+ */
 async function fetchMinecraftUUID(username) {
     try {
         const response = await fetch(`https://api.mojang.com/users/profiles/minecraft/${username}`);

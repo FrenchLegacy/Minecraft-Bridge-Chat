@@ -1,3 +1,24 @@
+/**
+ * Message Handler - Discord Message Processing
+ * 
+ * This file handles incoming Discord messages and processes them for bridging to Minecraft.
+ * It filters messages, handles commands, and formats messages for transmission to Minecraft bots.
+ * 
+ * The handler provides:
+ * - Message filtering (bot messages, monitored channels)
+ * - Command detection and processing
+ * - Message formatting for Minecraft chat limits
+ * - Channel validation and caching
+ * - Event emission for processed messages
+ * 
+ * Messages from Discord are cleaned (mentions, emojis, formatting) and truncated
+ * to fit Minecraft's chat length limits before being sent to the bridge.
+ * 
+ * @author Fabien83560
+ * @version 1.0.0
+ * @license ISC
+ */
+
 // Globals Imports
 const { EmbedBuilder: DiscordEmbedBuilder } = require('discord.js');
 const EventEmitter = require('events');
@@ -7,7 +28,20 @@ const BridgeLocator = require("../../../bridgeLocator.js");
 const MessageFormatter = require("../../../shared/MessageFormatter.js");
 const logger = require("../../../shared/logger");
 
+/**
+ * MessageHandler - Process incoming Discord messages
+ * 
+ * Extends EventEmitter to emit processed messages for the bridge system.
+ * Handles message validation, filtering, and formatting.
+ * 
+ * @class
+ * @extends EventEmitter
+ */
 class MessageHandler extends EventEmitter {
+    /**
+     * Create a new MessageHandler instance
+     * Initializes configuration and message filtering
+     */
     constructor() {
         super();
 
@@ -32,6 +66,11 @@ class MessageHandler extends EventEmitter {
 
     /**
      * Initialize components that don't require Discord client
+     * 
+     * Sets up the message formatter with appropriate configuration
+     * for processing Discord messages into Minecraft-compatible format.
+     * 
+     * @private
      */
     initializeComponents() {
         try {
@@ -56,7 +95,13 @@ class MessageHandler extends EventEmitter {
 
     /**
      * Initialize with Discord client
+     * 
+     * Called after Discord client is ready. Validates and caches channels,
+     * and adds the bot's own user ID to the ignore list.
+     * 
+     * @async
      * @param {Client} client - Discord client instance
+     * @throws {Error} If client is not provided or channel validation fails
      */
     async initialize(client) {
         if (!client) {
@@ -82,6 +127,16 @@ class MessageHandler extends EventEmitter {
         }
     }
 
+    /**
+     * Validate and cache Discord channels
+     * 
+     * Fetches and validates the configured chat and staff channels from Discord.
+     * Caches channel references for efficient message processing.
+     * 
+     * @async
+     * @private
+     * @throws {Error} If channels are not found or configuration is invalid
+     */
     async validateAndCacheChannels() {
         if (!this.client) {
             throw new Error('Discord client not available for channel validation');
@@ -127,8 +182,14 @@ class MessageHandler extends EventEmitter {
     // ==================== MESSAGE HANDLING ====================
 
     /**
-     * Handle incoming Discord message with enhanced error handling support
-     * @param {Message} message - Discord message object
+     * Handle incoming Discord message
+     * 
+     * Main entry point for processing Discord messages. Filters out bot messages,
+     * validates channel source, detects commands, and processes regular messages
+     * for bridging to Minecraft. Includes error handling with reaction feedback.
+     * 
+     * @async
+     * @param {Message} message - Discord.js message object
      */
     async handleMessage(message) {
         try {
@@ -169,8 +230,15 @@ class MessageHandler extends EventEmitter {
     }
 
     /**
-     * Process message for bridging to Minecraft with enhanced error handling
-     * @param {Message} message - Discord message object
+     * Process message for bridging to Minecraft
+     * 
+     * Cleans and formats the message content, determines the channel type,
+     * adds processing reactions for user feedback, and emits a message event
+     * for the bridge to handle.
+     * 
+     * @async
+     * @private
+     * @param {Message} message - Discord.js message object
      */
     async processMessageForBridge(message) {
         try {
@@ -253,8 +321,13 @@ class MessageHandler extends EventEmitter {
 
     /**
      * Process Discord message data
+     * 
+     * Validates and structures Discord message data for the bridge system.
+     * Creates a standardized message object with all necessary information.
+     * 
+     * @private
      * @param {object} messageObject - Raw Discord message object
-     * @returns {object|null} Processed message data
+     * @returns {object|null} Processed message data or null if invalid
      */
     processDiscordMessage(messageObject) {
         try {
@@ -300,6 +373,12 @@ class MessageHandler extends EventEmitter {
 
     /**
      * Handle Discord commands
+     * 
+     * Processes commands that start with the command prefix.
+     * Supports ping, status, and help commands.
+     * 
+     * @async
+     * @private
      * @param {Message} message - Discord message object
      */
     async handleCommand(message) {
@@ -335,6 +414,11 @@ class MessageHandler extends EventEmitter {
 
     /**
      * Handle status command
+     * 
+     * Displays the current bridge connection status with an embed.
+     * 
+     * @async
+     * @private
      * @param {Message} message - Discord message object
      */
     async handleStatusCommand(message) {
@@ -367,6 +451,11 @@ class MessageHandler extends EventEmitter {
 
     /**
      * Handle help command
+     * 
+     * Displays available commands with descriptions in an embed.
+     * 
+     * @async
+     * @private
      * @param {Message} message - Discord message object
      */
     async handleHelpCommand(message) {
@@ -406,8 +495,13 @@ class MessageHandler extends EventEmitter {
 
     /**
      * Clean message content for Minecraft compatibility
-     * @param {string} content - Raw message content
-     * @returns {string} Cleaned content
+     * 
+     * Removes Discord-specific formatting, converts mentions to plain text,
+     * handles emojis, and truncates to Minecraft's character limit (200 chars).
+     * 
+     * @private
+     * @param {string} content - Original Discord message content
+     * @returns {string} Cleaned message content suitable for Minecraft
      */
     cleanMessageContent(content) {
         if (!content) return '';
@@ -447,7 +541,11 @@ class MessageHandler extends EventEmitter {
 
     /**
      * Add bot user to ignore list
-     * @param {string} userId - User ID to ignore
+     * 
+     * Prevents messages from specific bot users from being processed
+     * to avoid message loops.
+     * 
+     * @param {string} userId - Discord user ID to ignore
      */
     addBotUser(userId) {
         this.botUsers.add(userId);
@@ -456,7 +554,8 @@ class MessageHandler extends EventEmitter {
 
     /**
      * Remove bot user from ignore list
-     * @param {string} userId - User ID to remove
+     * 
+     * @param {string} userId - Discord user ID to remove from ignore list
      */
     removeBotUser(userId) {
         this.botUsers.delete(userId);
@@ -465,8 +564,11 @@ class MessageHandler extends EventEmitter {
 
     /**
      * Get channel by type
-     * @param {string} channelType - Channel type (chat/staff)
-     * @returns {Channel|null} Discord channel
+     * 
+     * Retrieves cached Discord channel reference.
+     * 
+     * @param {string} channelType - Channel type ('chat' or 'staff')
+     * @returns {Channel|null} Discord channel object or null if not found
      */
     getChannel(channelType) {
         return this.channels[channelType] || null;
@@ -474,8 +576,11 @@ class MessageHandler extends EventEmitter {
 
     /**
      * Check if channel is monitored
-     * @param {string} channelId - Channel ID
-     * @returns {boolean} Whether channel is monitored
+     * 
+     * Determines if messages from the given channel should be processed.
+     * 
+     * @param {string} channelId - Discord channel ID
+     * @returns {boolean} True if channel should be monitored
      */
     isMonitoredChannel(channelId) {
         return channelId === this.channels.chat?.id || channelId === this.channels.staff?.id;
@@ -483,7 +588,11 @@ class MessageHandler extends EventEmitter {
 
     /**
      * Update configuration
-     * @param {object} newConfig - New configuration
+     * 
+     * Allows runtime updates to handler configuration such as command prefix
+     * and message formatter settings.
+     * 
+     * @param {object} newConfig - New configuration object
      */
     updateConfig(newConfig) {
         // Update command prefix
@@ -501,6 +610,9 @@ class MessageHandler extends EventEmitter {
 
     /**
      * Cleanup resources
+     * 
+     * Cleans up resources and removes all event listeners when handler is destroyed.
+     * Should be called before disposing of the handler instance.
      */
     cleanup() {
         this.botUsers.clear();

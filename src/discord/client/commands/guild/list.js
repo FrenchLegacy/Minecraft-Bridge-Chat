@@ -1,3 +1,83 @@
+/**
+ * Guild List Subcommand - Member Listing with Pagination
+ * 
+ * This subcommand provides comprehensive guild member listing with pagination, sorting,
+ * and filtering capabilities. It can display online, offline, or all members from a guild,
+ * organized by rank with interactive pagination buttons for navigating through large
+ * member lists. The command directly captures raw Minecraft chat output to parse member
+ * information including names, Hypixel ranks, and guild ranks.
+ * 
+ * Command Features:
+ * - List online, offline, or all guild members
+ * - Interactive pagination with navigation buttons (previous/next)
+ * - 20 members per page for optimal Discord display
+ * - Automatic rank detection and grouping from guild structure
+ * - Sort by rank priority (configurable), name (A-Z), or name (Z-A)
+ * - Rank distribution statistics on first page
+ * - Bot member detection and labeling
+ * - Member count by rank
+ * - Color-coded embeds based on list type
+ * - 5-minute button interaction timeout
+ * - Comprehensive error handling
+ * 
+ * List Types:
+ * - Online: Shows currently online guild members (/g online)
+ * - Offline: Calculates offline by subtracting online from all members (/gl + /g online)
+ * - All: Shows all guild members regardless of status (/gl)
+ * 
+ * Sorting Options:
+ * - rank: Sort by guild rank priority (highest to lowest), then alphabetically
+ * - name: Sort alphabetically A-Z
+ * - name_desc: Sort alphabetically Z-A
+ * 
+ * Rank System:
+ * - Dynamically reads rank structure from guild configuration
+ * - Guild Master and Staff have fixed high priorities
+ * - Other ranks prioritized based on configuration order (first = highest)
+ * - Default rank assigned to members without specific rank
+ * 
+ * Pagination System:
+ * - 20 members per page maximum
+ * - Previous/Next navigation buttons
+ * - Disabled buttons at start/end of list
+ * - Page indicator showing current/total pages
+ * - Buttons expire after 5 minutes
+ * - Only command executor can interact with buttons
+ * 
+ * Member Display Format:
+ * - Status icon (👤) for all members
+ * - [BOT] prefix for bot accounts
+ * - [Hypixel Rank] prefix for ranked players
+ * - Player name in code formatting
+ * - Grouped by guild rank
+ * - Member count per rank in field headers
+ * 
+ * Technical Details:
+ * - Raw message capture from Minecraft bot connection
+ * - 3-5 second wait time for message collection
+ * - Regex patterns for player name extraction
+ * - Duplicate member filtering
+ * - Dynamic rank detection from chat patterns
+ * 
+ * Usage: /guild list <guildname> <type> [sort]
+ * Permission: User (available to all members)
+ * Response: Ephemeral (only visible to command executor)
+ * 
+ * Examples:
+ * - /guild list FrenchLegacy online
+ *   Shows all currently online members
+ * 
+ * - /guild list FrenchLegacy offline
+ *   Shows all offline members
+ * 
+ * - /guild list FrenchLegacy all rank
+ *   Shows all members sorted by rank
+ * 
+ * @author Panda_Sauvage
+ * @version 1.0.0
+ * @license ISC
+ */
+
 // Globals Imports
 const {
     EmbedBuilder,
@@ -10,9 +90,21 @@ const {
   const CommandResponseListener = require("../../handlers/CommandResponseListener.js");
   const logger = require("../../../../shared/logger");
   
-  // Singleton instance for command response listener
+  /**
+   * Command response listener singleton instance
+   * Cached to avoid creating multiple instances
+   * @type {CommandResponseListener|null}
+   */
   let commandResponseListener = null;
   
+  /**
+   * Get or create CommandResponseListener singleton
+   * 
+   * Returns the existing singleton instance or creates a new one if needed.
+   * Ensures only one listener instance exists throughout the application.
+   * 
+   * @returns {CommandResponseListener} Singleton instance
+   */
   function getCommandResponseListener() {
     if (!commandResponseListener) {
       commandResponseListener = new CommandResponseListener();
@@ -20,9 +112,40 @@ const {
     return commandResponseListener;
   }
   
+  /**
+   * List Subcommand Module
+   * 
+   * Exports configuration and execution function for the list subcommand.
+   * 
+   * @module guild/list
+   * @type {object}
+   * @property {string} permission - Required permission level ('user')
+   * @property {Function} execute - Command execution function
+   */
   module.exports = {
+    /**
+     * Permission level required to execute this subcommand
+     * 
+     * Set to 'user' to allow all members to view guild member lists.
+     * 
+     * @type {string}
+     */
     permission: "user",
   
+    /**
+     * Execute the list subcommand
+     * 
+     * Entry point for the list command. Defers the reply immediately
+     * to prevent timeout, then delegates to handleListCommand for processing.
+     * 
+     * @async
+     * @param {ChatInputCommandInteraction} interaction - Discord interaction object
+     * @param {object} context - Command execution context
+     * @param {Client} context.client - Discord client instance
+     * @param {object} context.config - Configuration object
+     * @param {object} context.bridgeLocator - BridgeLocator instance
+     * @returns {Promise<void>}
+     */
     async execute(interaction, context) {
       // Defer the reply since this might take some time
       await interaction.deferReply({ ephemeral: true });
@@ -31,10 +154,31 @@ const {
     },
   };
   
+  // ==================== MAIN COMMAND HANDLER ====================
+  
   /**
    * Handle the guild list command
-   * @param {ChatInputCommandInteraction} interaction - Discord interaction
-   * @param {object} context - Command context with client, config, etc.
+   * 
+   * Main logic for listing guild members. Validates parameters, determines list type,
+   * executes appropriate Minecraft commands, parses responses, and sends paginated
+   * results to Discord.
+   * 
+   * Execution Flow:
+   * 1. Extract parameters (guild name, list type, sort type)
+   * 2. Validate Minecraft manager availability
+   * 3. Find and validate guild configuration
+   * 4. Verify guild connection status
+   * 5. Send initial processing embed
+   * 6. Execute appropriate handler based on list type (online/offline/all)
+   * 7. Sort and paginate results
+   * 8. Send interactive paginated response with buttons
+   * 9. Log success or handle errors
+   * 
+   * @async
+   * @private
+   * @param {ChatInputCommandInteraction} interaction - Discord interaction object
+   * @param {object} context - Command execution context
+   * @returns {Promise<void>}
    */
   async function handleListCommand(interaction, context) {
     const guildName = interaction.options.getString("guildname");
@@ -162,13 +306,22 @@ const {
     }
   }
   
+  // ==================== LIST TYPE HANDLERS ====================
+  
   /**
    * Handle online members list
+   * 
+   * Captures raw Minecraft chat output from `/g online` command to extract
+   * currently online guild members. Listens to bot messages for 3 seconds
+   * to collect all output.
+   * 
+   * @async
    * @param {object} botManager - Bot manager instance
    * @param {object} guildConfig - Guild configuration
    * @param {object} interaction - Discord interaction
    * @param {object} config - Configuration object
-   * @returns {object} Result with members list
+   * @returns {Promise<object>} Result with members array and total count
+   * @throws {Error} If timeout occurs or bot connection unavailable
    */
   async function handleOnlineList(botManager, guildConfig, interaction, config) {
     return new Promise(async (resolve, reject) => {
@@ -233,11 +386,18 @@ const {
   
   /**
    * Handle offline members list
+   * 
+   * Calculates offline members by executing both `/gl` (all members) and
+   * `/g online` commands, then subtracting online from all. Requires 5 seconds
+   * to collect both command outputs with message markers to distinguish them.
+   * 
+   * @async
    * @param {object} botManager - Bot manager instance
    * @param {object} guildConfig - Guild configuration
    * @param {object} interaction - Discord interaction
    * @param {object} config - Configuration object
-   * @returns {object} Result with members list
+   * @returns {Promise<object>} Result with offline members array and total count
+   * @throws {Error} If timeout occurs or bot connection unavailable
    */
   async function handleOfflineList(botManager, guildConfig, interaction, config) {
     return new Promise(async (resolve, reject) => {
@@ -347,11 +507,18 @@ const {
   
   /**
    * Handle all members list
+   * 
+   * Captures raw Minecraft chat output from `/gl` command to extract all
+   * guild members regardless of online status. Listens to bot messages
+   * for 3 seconds to collect complete output.
+   * 
+   * @async
    * @param {object} botManager - Bot manager instance
    * @param {object} guildConfig - Guild configuration
    * @param {object} interaction - Discord interaction
    * @param {object} config - Configuration object
-   * @returns {object} Result with members list
+   * @returns {Promise<object>} Result with all members array and total count
+   * @throws {Error} If timeout occurs or bot connection unavailable
    */
   async function handleAllList(botManager, guildConfig, interaction, config) {
     return new Promise(async (resolve, reject) => {
@@ -413,9 +580,16 @@ const {
       }
     });
   }
+
+  // ==================== PARSING FUNCTIONS ====================
   
   /**
    * Parse online members from command response
+   * 
+   * Legacy parsing function - currently unused in favor of extractMembersFromMessage.
+   * Kept for potential future use or alternative parsing strategy.
+   * 
+   * @deprecated Use extractMembersFromMessage instead
    * @param {string} message - Command response message
    * @returns {Array<string>} Array of online member names
    */
@@ -450,6 +624,11 @@ const {
   
   /**
    * Parse guild list from command response
+   * 
+   * Legacy parsing function - currently unused in favor of extractMembersFromMessage.
+   * Kept for potential future use or alternative parsing strategy.
+   * 
+   * @deprecated Use extractMembersFromMessage instead
    * @param {string} message - Command response message
    * @returns {Array<string>} Array of all member names
    */
@@ -475,15 +654,23 @@ const {
   
     return members;
   }
+
+  // ==================== PAGINATION SYSTEM ====================
   
   /**
    * Send paginated response with navigation buttons
+   * 
+   * Creates paginated embed display with Previous/Next navigation buttons.
+   * Handles empty results and sets up button collector for interaction.
+   * 
+   * @async
    * @param {object} interaction - Discord interaction
    * @param {string} guildName - Guild name
    * @param {string} listType - Type of list (online/offline/all)
-   * @param {object} result - Result object with members
+   * @param {object} result - Result object with members array
    * @param {string} sortType - Sort type (rank/name/name_desc)
    * @param {object} config - Configuration object
+   * @returns {Promise<void>}
    */
   async function sendPaginatedResponse(
     interaction,
@@ -515,21 +702,12 @@ const {
     // Sort members based on the specified sort type
     const sortedMembers = sortMembers(members, sortType, config, guildName);
   
-    // Debug: Log first few members to see their guild ranks
-    logger.discord(
-      `[GUILD-LIST] DEBUG: First 10 members after sorting:`,
-      sortedMembers
-        .slice(0, 10)
-        .map((m) => `${m.name} (${m.guildRank || "Default"})`)
-    );
-  
     // Debug: Log rank distribution
     const rankCounts = {};
     sortedMembers.forEach((m) => {
       const rank = m.guildRank || "Default";
       rankCounts[rank] = (rankCounts[rank] || 0) + 1;
     });
-    logger.discord(`[GUILD-LIST] DEBUG: Rank distribution:`, rankCounts);
   
     // Calculate rank statistics
     const rankStats = calculateRankStatistics(sortedMembers);
@@ -560,13 +738,17 @@ const {
   
   /**
    * Create pagination data structure
+   * 
+   * Divides members into pages of 20 members each. Creates page objects
+   * with member arrays and page numbers.
+   * 
    * @param {Array} members - Sorted members array
    * @param {string} guildName - Guild name
    * @param {string} listType - Type of list
    * @param {string} sortType - Sort type
    * @param {number} total - Total member count
    * @param {Object} rankStats - Rank statistics
-   * @returns {Object} Pagination data
+   * @returns {Object} Pagination data structure
    */
   function createPaginationData(
     members,
@@ -603,10 +785,16 @@ const {
   
   /**
    * Create paginated embed and components for a specific page
-   * @param {Object} paginationData - Pagination data
+   * 
+   * Builds Discord embed with member list for specified page. Includes
+   * rank distribution on first page, navigation buttons, and grouped
+   * member display by guild rank.
+   * 
+   * @param {Object} paginationData - Pagination data structure
    * @param {number} pageIndex - Current page index (0-based)
    * @param {object} config - Configuration object
-   * @returns {Object} Object with embed and components
+   * @returns {Object} Object with embed and components (buttons)
+   * @throws {Error} If page index is invalid
    */
   function createPaginatedEmbed(paginationData, pageIndex, config) {
     const { guildName, listType, total, rankStats, pages, totalPages } =
@@ -751,9 +939,13 @@ const {
   
   /**
    * Format member list for pagination display
+   * 
+   * Formats array of members into Discord-compatible string with icons,
+   * bot labels, Hypixel ranks, and player names. One member per line.
+   * 
    * @param {Array} members - Array of member objects
    * @param {object} config - Configuration object
-   * @returns {string} Formatted member list
+   * @returns {string} Formatted member list string
    */
   function formatMemberListForPagination(members, config) {
     if (!members || !Array.isArray(members) || members.length === 0) {
@@ -789,10 +981,16 @@ const {
   
   /**
    * Set up button collector for pagination
-   * @param {Message} message - Discord message
-   * @param {Object} paginationData - Pagination data
-   * @param {string} userId - User ID who can interact with buttons
+   * 
+   * Creates message component collector that listens for button interactions.
+   * Updates embed on previous/next button clicks. Automatically expires after
+   * 5 minutes and disables buttons.
+   * 
+   * @param {Message} message - Discord message with buttons
+   * @param {Object} paginationData - Pagination data structure
+   * @param {string} userId - User ID who can interact (command executor)
    * @param {object} config - Configuration object
+   * @returns {void}
    */
   function setupButtonCollector(message, paginationData, userId, config) {
     const collector = message.createMessageComponentCollector({
@@ -857,12 +1055,17 @@ const {
     });
   }
   
+  // ==================== SORTING AND GROUPING ====================
+  
   /**
    * Sort members based on the specified sort type
+   * 
+   * Wrapper function that routes to appropriate sorting algorithm.
+   * 
    * @param {Array} members - Array of member objects
    * @param {string} sortType - Sort type (rank/name/name_desc)
    * @param {object} config - Configuration object
-   * @param {string} guildName - Guild name to get ranks for
+   * @param {string} guildName - Guild name for rank priority lookup
    * @returns {Array} Sorted array of members
    */
   function sortMembers(members, sortType = "rank", config, guildName) {
@@ -881,6 +1084,11 @@ const {
   
   /**
    * Sort members by guild rank priority and then by name
+   * 
+   * Implements complex sorting with dynamic rank priority based on guild
+   * configuration. Guild Master=1, Staff=2, then config ranks in reverse
+   * order (first in config = highest priority), Default=999.
+   * 
    * @param {Array} members - Array of member objects
    * @param {object} config - Configuration object
    * @param {string} guildName - Guild name to get ranks for
@@ -931,8 +1139,11 @@ const {
   
   /**
    * Calculate rank statistics
+   * 
+   * Counts members per guild rank for statistics display.
+   * 
    * @param {Array} members - Array of member objects
-   * @returns {Object} Rank statistics
+   * @returns {Object} Rank statistics object mapping rank names to counts
    */
   function calculateRankStatistics(members) {
     const stats = {};
@@ -947,6 +1158,10 @@ const {
   
   /**
    * Group members by guild rank
+   * 
+   * Creates object with guild ranks as keys and arrays of members as values.
+   * Used for displaying members organized by rank in embeds.
+   * 
    * @param {Array} members - Array of member objects
    * @returns {Object} Members grouped by guild rank
    */
@@ -970,11 +1185,17 @@ const {
     return grouped;
   }
   
+  // ==================== UTILITY FUNCTIONS ====================
+  
   /**
    * Check if a member name is a bot
-   * @param {string} name - Member name
+   * 
+   * Compares member name against bot usernames from guild configurations.
+   * Used to add [BOT] prefix to bot accounts in member lists.
+   * 
+   * @param {string} name - Member name to check
    * @param {object} config - Configuration object
-   * @returns {boolean} True if the name appears to be a bot
+   * @returns {boolean} True if the name matches a known bot account
    */
   function isBotName(name, config) {
     if (!name || typeof name !== "string") return false;
@@ -992,8 +1213,12 @@ const {
   
   /**
    * Get member status icon
+   * 
+   * Returns icon for member display. Currently always returns 👤.
+   * Could be extended to show online/offline status if available.
+   * 
    * @param {Object} member - Member object
-   * @returns {string} Status icon
+   * @returns {string} Status icon emoji
    */
   function getMemberStatusIcon(member) {
     // You can extend this to show online/offline status if available
@@ -1002,8 +1227,11 @@ const {
   
   /**
    * Get color based on list type
-   * @param {string} listType - Type of list
-   * @returns {number} Color code
+   * 
+   * Returns Discord embed color code for different list types.
+   * 
+   * @param {string} listType - Type of list (online/offline/all)
+   * @returns {number} Discord color code in hex
    */
   function getListTypeColor(listType) {
     switch (listType) {
@@ -1020,6 +1248,10 @@ const {
   
   /**
    * Find guild configuration by name
+   * 
+   * Searches for a guild in the configuration by name (case-insensitive)
+   * and verifies it is enabled. Only returns enabled guilds.
+   * 
    * @param {object} config - Configuration object
    * @param {string} guildName - Guild name to search for
    * @returns {object|null} Guild configuration or null if not found
@@ -1034,8 +1266,12 @@ const {
   
   /**
    * Get list of available guild names
+   * 
+   * Returns an array of enabled guild names from configuration.
+   * Used for displaying available options when a guild is not found.
+   * 
    * @param {object} config - Configuration object
-   * @returns {string[]} Array of guild names
+   * @returns {Array<string>} Array of enabled guild names
    */
   function getAvailableGuilds(config) {
     const guilds = config.get("guilds") || [];
@@ -1044,10 +1280,20 @@ const {
   
   /**
    * Extract members from raw message
+   * 
+   * Parses raw Minecraft chat output to extract member information including
+   * names, Hypixel ranks, and guild ranks. Uses regex patterns to match
+   * player entries and dynamically detects rank sections from chat patterns.
+   * 
+   * Parsing Patterns:
+   * - Rank sections: "-- Rank Name --"
+   * - Players with Hypixel rank: "[RANK] PlayerName ●"
+   * - Players without rank: "PlayerName ●"
+   * 
    * @param {string} message - Raw message from Minecraft
    * @param {object} config - Configuration object
-   * @param {string} guildName - Guild name to get ranks for
-   * @returns {Array} Array of member objects with name, rank (Hypixel), and guildRank
+   * @param {string} guildName - Guild name to get ranks for dynamic detection
+   * @returns {Array<object>} Array of member objects with name, rank (Hypixel), and guildRank
    */
   function extractMembersFromMessage(message, config, guildName) {
     if (!message || typeof message !== "string") {
@@ -1097,13 +1343,6 @@ const {
       while ((match = rankPattern.exec(trimmedLine)) !== null) {
         const hypixelRank = match[1] ? match[1].trim() : "";
         const playerName = match[2] ? match[2].trim() : "";
-        console.log(
-          "DEBUG: Found player with rank:",
-          playerName,
-          hypixelRank,
-          "in guild rank:",
-          currentGuildRank
-        );
   
         if (
           playerName &&

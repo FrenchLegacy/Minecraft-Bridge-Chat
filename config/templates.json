@@ -92,10 +92,10 @@
           }
         },
         "officer": {
-          "basic": "🛡️ {message}",
-          "withTag": "🛡️ {message}",
-          "withSourceTag": "🛡️ {message}",
-          "withBothTags": "🛡️ {message}",
+          "basic": "{message}",
+          "withTag": "{message}",
+          "withSourceTag": "{message}",
+          "withBothTags": "{message}",
           "embed": {
             "title": "🛡️ Officer Chat - {guildName}",
             "description": "**{username}**: {message}",

@@ -1,3 +1,23 @@
+/**
+ * Main Application Entry Point
+ * 
+ * This file serves as the main entry point and orchestrator for the Minecraft-Discord Bridge application.
+ * It initializes and coordinates all major subsystems including Minecraft bots, Discord client, and the
+ * bridge system that connects them. The MainBridge class manages the complete lifecycle of the application
+ * from startup to shutdown, ensuring proper initialization order and graceful error handling.
+ * 
+ * Key Responsibilities:
+ * - Initialize all core systems and directories
+ * - Start and manage Minecraft and Discord connections
+ * - Set up cross-manager integrations for message bridging
+ * - Handle graceful shutdown on termination signals
+ * - Coordinate event flow between subsystems
+ * 
+ * @author Fabien83560
+ * @version 1.0.0
+ * @license ISC
+ */
+
 // Globals Imports
 const fs = require('fs');
 const path = require('path');
@@ -9,7 +29,22 @@ const MinecraftManager = require('./minecraft/MinecraftManager.js');
 const DiscordManager = require('./discord/DiscordManager.js');
 const BridgeLocator = require("./bridgeLocator.js");
 
+/**
+ * MainBridge - Core application orchestrator
+ * 
+ * Manages the complete lifecycle of the bridge application including:
+ * - Initialization of all subsystems
+ * - Coordinated startup sequence
+ * - Event handler registration
+ * - Graceful shutdown procedures
+ * 
+ * @class
+ */
 class MainBridge {
+    /**
+     * Initialize MainBridge instance
+     * Sets up timing tracking and configuration management
+     */
     constructor() {
         this._startTime = Date.now();
         this._isRunning = false;
@@ -19,6 +54,21 @@ class MainBridge {
         this._discordManager = null;
     }
 
+    /**
+     * Start the application
+     * 
+     * Executes a sequential startup process:
+     * 1. Initialize core systems (directories, logging)
+     * 2. Initialize management systems
+     * 3. Initialize Minecraft connections
+     * 4. Initialize Discord bot
+     * 5. Setup cross-manager integration
+     * 6. Finalize startup and log summary
+     * 
+     * @async
+     * @returns {Promise}
+     * @throws {Error} If any initialization step fails
+     */
     async start() {
         logger.info("===========================================");
         logger.info("========= 🚀 Starting Application =========");
@@ -56,6 +106,19 @@ class MainBridge {
         }
     }
 
+    /**
+     * Stop the application gracefully
+     * 
+     * Performs controlled shutdown:
+     * 1. Stops all Minecraft bot connections
+     * 2. Disconnects Discord bot
+     * 3. Cleans up resources
+     * 4. Reports shutdown metrics
+     * 
+     * @async
+     * @returns {Promise}
+     * @throws {Error} If shutdown process encounters errors
+     */
     async stop() {
         logger.info("===========================================");
         logger.info("========== 🛑 Stopping Application ==========");
@@ -89,6 +152,17 @@ class MainBridge {
         }
     }
 
+    /**
+     * Initialize core systems
+     * 
+     * Creates required directories and validates logging configuration.
+     * Ensures all necessary file system paths exist before other systems start.
+     * 
+     * @async
+     * @private
+     * @returns {Promise}
+     * @throws {Error} If directory creation fails
+     */
     async initializeCoreSystems() {
         logger.info("===========================================");
         logger.info("====== ⚙️  Initializing core systems  ======");
@@ -103,6 +177,7 @@ class MainBridge {
             let createdDirs = 0;
             let checkedDirs = 0;
             
+            // Create missing directories
             for (const [dirType, dirPath] of Object.entries(requiredDirs)) {
                 const fullPath = path.resolve(dirPath);
                 checkedDirs++;
@@ -128,17 +203,12 @@ class MainBridge {
                 logger.debug(`📁 All ${checkedDirs} required directories already exist`);
             }
             
-            // Verify logging configuration and directory
+            // Verify logging configuration
             const loggingConfig = this.config.get("features.logging");
-            logger.debug('Logging configuration:', loggingConfig);
             
             if (loggingConfig.file) {
                 logger.info('📝 File logging enabled');
-                logger.debug(`Log files location: ${requiredDirs.logs}`);
             }
-            
-            // Log all configured paths for debug
-            logger.debug('Configured directories:', requiredDirs);
             
             logger.logPerformance('Core systems initialization', stepStartTime);
             logger.info('✅ Core systems initialized');
@@ -149,6 +219,16 @@ class MainBridge {
         }
     }
 
+    /**
+     * Initialize management systems
+     * 
+     * Reserved for future monitoring and administration features.
+     * Currently a placeholder for system management initialization.
+     * 
+     * @async
+     * @private
+     * @returns {Promise}
+     */
     async initializeManagementSystems() {
         logger.info("===========================================");
         logger.info("===== ⚙️  Initializing Management ======");
@@ -157,6 +237,7 @@ class MainBridge {
         const stepStartTime = Date.now();
 
         try {
+            // Reserved for future management system initialization
             logger.logPerformance('Management systems initialization', stepStartTime);
             logger.info('✅ Management systems initialized');
 
@@ -166,6 +247,20 @@ class MainBridge {
         }
     }
 
+    /**
+     * Initialize Minecraft module
+     * 
+     * Creates and starts the MinecraftManager which handles:
+     * - Multiple bot connections
+     * - Guild chat monitoring
+     * - Event detection
+     * - Message parsing and routing
+     * 
+     * @async
+     * @private
+     * @returns {Promise}
+     * @throws {Error} If Minecraft initialization fails
+     */
     async initializeMinecraftModule() {
         logger.info("===========================================");
         logger.info("==== 🎮  Initializing Minecraft Module ====");
@@ -176,7 +271,7 @@ class MainBridge {
             this._minecraftManager = new MinecraftManager();
             await this._minecraftManager.start();
             
-            // Set up event handlers
+            // Set up event handlers for Minecraft events
             this.setupMinecraftEventHandlers();
             
             logger.logPerformance('Minecraft module initialization', stepStartTime);
@@ -187,21 +282,37 @@ class MainBridge {
         }
     }
 
+    /**
+     * Initialize Discord module
+     * 
+     * Creates and starts the DiscordManager which handles:
+     * - Discord bot connection
+     * - Slash command registration
+     * - Message handling
+     * - Embed creation and sending
+     * 
+     * @async
+     * @private
+     * @returns {Promise}
+     * @throws {Error} If Discord initialization fails
+     */
     async initializeDiscordModule() {
         logger.info("===========================================");
-        logger.info("==== 💬  Initializing Discord Module  ====");
+        logger.info("==== 💬  Initializing Discord Module ====");
         logger.info("===========================================");
 
         const stepStartTime = Date.now();
+
         try {
             this._discordManager = new DiscordManager();
             await this._discordManager.start();
             
-            // Set up event handlers
+            // Set up event handlers for Discord events
             this.setupDiscordEventHandlers();
             
             logger.logPerformance('Discord module initialization', stepStartTime);
             logger.discord('✅ Discord module initialized');
+
         } catch (error) {
             logger.logError(error, 'Discord module initialization failed');
             throw new Error(`Discord module initialization failed: ${error.message}`);
@@ -210,61 +321,91 @@ class MainBridge {
 
     /**
      * Setup cross-manager integration
+     * 
+     * Establishes bidirectional communication between Minecraft and Discord:
+     * - Minecraft manager gets reference to Discord manager
+     * - Discord manager gets reference to Minecraft manager
+     * - Enables message bridging in both directions
+     * 
+     * @private
      */
     setupCrossManagerIntegration() {
         logger.info("===========================================");
-        logger.info("=== 🔗 Setting up Cross-Integration ===");
+        logger.info("=== 🔗  Setting up Cross-Integration ===");
         logger.info("===========================================");
 
+        const stepStartTime = Date.now();
+
         try {
-            // Set Discord manager reference in Minecraft manager
+            // Establish cross-references between managers
             if (this._minecraftManager && this._discordManager) {
                 this._minecraftManager.setDiscordManager(this._discordManager);
                 logger.bridge('✅ Discord manager linked to Minecraft manager');
             }
 
-            logger.info('✅ Cross-manager integration completed');
+            logger.logPerformance('Cross-manager integration', stepStartTime);
+
         } catch (error) {
             logger.logError(error, 'Cross-manager integration failed');
-            // Don't throw here - the system can still work with limited integration
         }
     }
 
+    /**
+     * Setup Minecraft event handlers
+     * 
+     * Registers listeners for Minecraft events:
+     * - Connection status changes
+     * - Guild chat messages
+     * - Guild events (join/leave/promote/etc)
+     * - Connection errors
+     * 
+     * @private
+     */
     setupMinecraftEventHandlers() {
         if (!this._minecraftManager) {
             return;
         }
 
+        // Handle connection status changes
         this._minecraftManager.onConnection((connectionData) => {
             if (connectionData.type === 'connected') {
-                logger.logMinecraftConnection(connectionData.guildId, connectionData.username, 'connected');
+                logger.minecraft(`Guild bot connected: ${connectionData.guildName} (${connectionData.username})`);
             } else if (connectionData.type === 'disconnected') {
-                logger.logMinecraftConnection(connectionData.guildId, connectionData.username, 'disconnected', { 
-                    reason: connectionData.reason 
-                });
-            } else if (connectionData.type === 'reconnected') {
-                logger.logMinecraftConnection(connectionData.guildId, connectionData.username, 'reconnected');
+                logger.minecraft(`Guild bot disconnected: ${connectionData.guildName}`);
             }
         });
         
+        // Handle connection errors
         this._minecraftManager.onError((error, guildId) => {
             logger.logError(error, `Minecraft connection error for guild: ${guildId}`);
         });
 
+        // Message and event handlers (processed by BridgeCoordinator)
         this._minecraftManager.onMessage((messageData) => {            
-            
+            // Messages are handled by BridgeCoordinator
         });
 
         this._minecraftManager.onEvent((eventData) => {            
-            
+            // Events are handled by BridgeCoordinator
         });
     }
 
+    /**
+     * Setup Discord event handlers
+     * 
+     * Registers listeners for Discord events:
+     * - Bot connection status
+     * - Incoming messages
+     * - Connection errors
+     * 
+     * @private
+     */
     setupDiscordEventHandlers() {
         if (!this._discordManager) {
             return;
         }
 
+        // Handle Discord connection status
         this._discordManager.onConnection((connectionData) => {
             if (connectionData.type === 'connected') {
                 logger.discord(`Discord bot connected: ${connectionData.bot.tag}`);
@@ -273,16 +414,29 @@ class MainBridge {
             }
         });
         
+        // Handle Discord errors
         this._discordManager.onError((error) => {
             logger.logError(error, 'Discord connection error');
         });
 
+        // Handle Discord messages (for Discord to Minecraft bridging)
         this._discordManager.onMessage((messageData) => {
-            // Discord message handling (for future Discord to Minecraft bridging)
             logger.debug(`Discord message received: ${messageData.type}`);
         });
     }
 
+    /**
+     * Finalize startup process
+     * 
+     * Completes initialization by:
+     * - Logging startup summary with configuration details
+     * - Reporting startup metrics
+     * - Verifying all systems are operational
+     * 
+     * @async
+     * @private
+     * @returns {Promise}
+     */
     async finalizeStartup() {
         logger.info("===========================================");
         logger.info("======= 🎯 Finalizing Startup =======");
@@ -291,7 +445,7 @@ class MainBridge {
         const stepStartTime = Date.now();
 
         try {
-            // Log startup summary
+            // Log configuration summary
             this.logStartupSummary();
 
             logger.logPerformance('Startup finalization', stepStartTime);
@@ -303,6 +457,17 @@ class MainBridge {
         }
     }
 
+    /**
+     * Log startup summary
+     * 
+     * Displays configured features and active settings including:
+     * - Number of guilds configured
+     * - Inter-guild relay status
+     * - Discord integration status
+     * - Monitoring settings
+     * 
+     * @private
+     */
     logStartupSummary() {
         const enabledGuilds = this.config.getEnabledGuilds();
         const interGuildEnabled = this.config.get('bridge.interGuild.enabled');
@@ -322,22 +487,33 @@ class MainBridge {
         logger.info(`   • Monitoring enabled: ${this.config.get('advanced.performance.enablePerformanceMonitoring') ? '✅' : '❌'}`);
         logger.info(`   • Log level: ${logger.getLevel()}`);
 
-        // List configured guilds
+        // List all configured guilds
         enabledGuilds.forEach(guild => {
             logger.info(`   • Guild: ${guild.name} [${guild.tag}] (${guild.server.serverName})`);
         });
     }
 
+    /**
+     * Get required directories from configuration
+     * 
+     * Determines all directory paths needed by the application:
+     * - Data directory
+     * - Logs directory
+     * - Database directory
+     * - Backups directory
+     * - Authentication cache directories (may be different per guild)
+     * 
+     * @private
+     * @returns {object} Map of directory types to paths
+     */
     getRequiredDirectories() {
-        // Get auth cache path from first enabled guild account
         const enabledGuilds = this.config.get("guilds").filter(guild => guild.enabled);
         let authCachePath = './data/auth-cache';
         
+        // Use sessionPath from first guild as primary auth cache location
         if (enabledGuilds.length > 0) {
-            // Use sessionPath from first guild as primary auth cache location
             const firstGuild = enabledGuilds[0];
             authCachePath = firstGuild.account.sessionPath || firstGuild.account.cachePath || authCachePath;
-            logger.debug(`Using auth cache path from ${firstGuild.name}: ${authCachePath}`);
         }
         
         const loggingConfig = this.config.get("features.logging");
@@ -348,14 +524,9 @@ class MainBridge {
             logsPath = loggingConfig.logFileDirectory;
         }
         
-        const databasePath = './data/database'; // TODO: Make configurable in settings
-        const backupsPath = './data/backups'; // TODO: Make configurable in settings
-        
         const directories = {
             data: 'data',
             logs: logsPath,
-            database: databasePath,
-            backups: backupsPath,
             authCache: authCachePath
         };
         
@@ -364,57 +535,52 @@ class MainBridge {
         enabledGuilds.forEach(guild => {
             const sessionPath = guild.account.sessionPath || authCachePath;
             const cachePath = guild.account.cachePath || authCachePath;
-            const profilesPath = guild.account.profilesFolder || authCachePath;
+            const accountAuthPath = sessionPath || cachePath;
             
-            uniqueAuthPaths.add(sessionPath);
-            uniqueAuthPaths.add(cachePath);
-            uniqueAuthPaths.add(profilesPath);
+            if (accountAuthPath && accountAuthPath !== authCachePath) {
+                uniqueAuthPaths.add(accountAuthPath);
+            }
         });
         
-        // Add additional auth directories if guilds use different paths
-        if (uniqueAuthPaths.size > 1) {
-            logger.debug(`Multiple auth cache paths detected: ${Array.from(uniqueAuthPaths).join(', ')}`);
-            let authIndex = 1;
-            uniqueAuthPaths.forEach(authPath => {
-                if (authPath !== authCachePath) {
-                    directories[`authCache${authIndex}`] = authPath;
-                    authIndex++;
-                }
-            });
-        }
+        // Add additional auth cache directories if guilds use different paths
+        let authCacheIndex = 1;
+        uniqueAuthPaths.forEach(authPath => {
+            directories[`authCache${authCacheIndex++}`] = authPath;
+        });
         
         return directories;
     }
 
-    isRunning() {
-        return this._isRunning;
-    }
-
+    /**
+     * Format uptime duration
+     * 
+     * Converts milliseconds to human-readable format (hours:minutes:seconds)
+     * 
+     * @private
+     * @param {number} ms - Uptime in milliseconds
+     * @returns {string} Formatted uptime string
+     */
     formatUptime(ms) {
-        const seconds = Math.floor(ms / 1000);
-        const minutes = Math.floor(seconds / 60);
-        const hours = Math.floor(minutes / 60);
-        const days = Math.floor(hours / 24);
-
-        if (days > 0) return `${days}d ${hours % 24}h ${minutes % 60}m`;
-        if (hours > 0) return `${hours}h ${minutes % 60}m`;
-        if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
-        return `${seconds}s`;
+        const seconds = Math.floor((ms / 1000) % 60);
+        const minutes = Math.floor((ms / (1000 * 60)) % 60);
+        const hours = Math.floor(ms / (1000 * 60 * 60));
+        
+        return `${hours}h ${minutes}m ${seconds}s`;
     }
 
-    // Inter-guild specific methods
-    getInterGuildConfig() {
-        return this.config.get('bridge.interGuild');
-    }
-
+    /**
+     * Update inter-guild configuration
+     * 
+     * Dynamically updates inter-guild relay settings without restart
+     * 
+     * @param {object} newConfig - New inter-guild configuration
+     * @returns {object} Updated configuration
+     */
     updateInterGuildConfig(newConfig) {
-        // Update configuration
         const currentConfig = this.config.get('bridge.interGuild');
         const updatedConfig = { ...currentConfig, ...newConfig };
         
-        // This would need to be saved to the config file in a real implementation
-        // For now, we'll just update the runtime config
-        
+        // Update configuration and notify managers
         if (this._minecraftManager) {
             this._minecraftManager.updateInterGuildConfig(updatedConfig);
             logger.info('Inter-guild configuration updated', updatedConfig);
@@ -423,18 +589,35 @@ class MainBridge {
         return updatedConfig;
     }
 
-    // Convenience methods for external access
+    /**
+     * Get Minecraft manager instance
+     * @returns {MinecraftManager} Minecraft manager instance
+     */
     getMinecraftManager() {
         return this._minecraftManager;
     }
 
+    /**
+     * Get Discord manager instance
+     * @returns {DiscordManager} Discord manager instance
+     */
     getDiscordManager() {
         return this._discordManager;
     }
 }
 
+// Module-level instance tracking
 let mainInstance = null;
 
+/**
+ * Main entry function
+ * 
+ * Creates and starts the MainBridge instance, then registers it
+ * with the BridgeLocator for global access by subsystems.
+ * 
+ * @async
+ * @returns {Promise}
+ */
 async function main() {
     try {
         mainInstance = new MainBridge();
@@ -446,20 +629,39 @@ async function main() {
     }
 }
 
-// Signal handling for clean shutdown
+// ==================== Signal Handling ====================
+
+/**
+ * Handle SIGINT signal (Ctrl+C)
+ * Initiates graceful shutdown when user presses Ctrl+C
+ */
 process.on('SIGINT', async () => {
     logger.info('🛑 Shutdown signal received (Ctrl+C)...');
     await handleShutdown('SIGINT');
 });
 
+/**
+ * Handle SIGTERM signal
+ * Initiates graceful shutdown when process receives termination signal
+ */
 process.on('SIGTERM', async () => {
     logger.info('🛑 Termination signal received...');
     await handleShutdown('SIGTERM');
 });
 
+/**
+ * Handle shutdown signals
+ * 
+ * Performs graceful shutdown sequence:
+ * 1. Log shutdown initiation
+ * 2. Stop main bridge instance
+ * 3. Exit process cleanly
+ * 
+ * @async
+ * @param {string} signal - Signal name (SIGINT/SIGTERM)
+ */
 async function handleShutdown(signal) {
     try {
-        logger.debug(`Processing ${signal} signal`);
         if (mainInstance) {
             await mainInstance.stop();
         }
@@ -471,20 +673,28 @@ async function handleShutdown(signal) {
     }
 }
 
-// Uncaught error handling
+// ==================== Error Handling ====================
+
+/**
+ * Handle uncaught exceptions
+ * Logs error and exits process to prevent undefined state
+ */
 process.on('uncaughtException', (error) => {
     logger.logError(error, 'Uncaught exception - process will exit');
     process.exit(1);
 });
 
+/**
+ * Handle unhandled promise rejections
+ * Logs error and exits process to prevent undefined state
+ */
 process.on('unhandledRejection', (reason, promise) => {
     const error = new Error(`Unhandled promise rejection: ${reason}`);
     logger.logError(error, 'Unhandled promise rejection - process will exit');
-    logger.debug('Rejected promise:', promise);
     process.exit(1);
 });
 
-// Start the application
+// Start the application if run directly
 if (require.main === module) {
     main();
 }

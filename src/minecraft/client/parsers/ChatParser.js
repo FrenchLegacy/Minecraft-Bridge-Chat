@@ -1,10 +1,88 @@
+/**
+ * Chat Parser - Minecraft Message Detection and Parsing
+ * 
+ * This file handles the detection, parsing, and structuring of chat messages from
+ * Minecraft servers. It transforms raw chat messages into structured data objects
+ * that can be processed by the bridge system and forwarded to Discord or other platforms.
+ * 
+ * Key responsibilities:
+ * - Chat message detection using pattern matching (MessagePatterns)
+ * - Message cleaning and normalization (MessageCleaner)
+ * - Message parsing and data extraction
+ * - Message type classification and routing
+ * - Structured message result creation with metadata
+ * - Content filtering and ignore patterns
+ * - Error handling and fallback parsing
+ * 
+ * Supported message types:
+ * - guild_chat: Regular guild chat messages (chatType: 'guild')
+ * - guild_chat: Officer chat messages (chatType: 'officer')
+ * - private_message: Private/whisper messages (direction: 'from' or 'to')
+ * - party_message: Party chat messages
+ * - system_message: System notifications and messages
+ * - ignored: Filtered messages based on ignore patterns
+ * - unknown: Messages that don't match any pattern
+ * - error: Messages that caused parsing errors
+ * 
+ * Parsing pipeline:
+ * 1. Clean and normalize raw message text
+ * 2. Check if message should be ignored (filter patterns)
+ * 3. Attempt guild chat parsing (guild + officer)
+ * 4. Attempt other message type parsing (private, party, system)
+ * 5. Return structured result or unknown/error result
+ * 
+ * Message result structure:
+ * {
+ *   type: string,              // Message type
+ *   chatType: string,          // Chat category (guild, officer, private, etc.)
+ *   username: string,          // Sender username
+ *   message: string,           // Cleaned message content
+ *   rank: string,              // User rank if applicable
+ *   raw: string,               // Cleaned raw text
+ *   guildId: string,           // Guild identifier
+ *   guildName: string,         // Guild name
+ *   guildTag: string,          // Guild tag
+ *   timestamp: number,         // Unix timestamp
+ *   parsedSuccessfully: bool,  // Parse success flag
+ *   parser: string,            // Parser name
+ *   parserVersion: string,     // Parser version
+ *   messageCategory: string,   // Message category
+ *   parsed: object             // Original match data
+ * }
+ * 
+ * @author Fabien83560
+ * @version 2.0.0
+ * @license ISC
+ */
+
 // Specific Imports
 const logger = require("../../../shared/logger");
 const BridgeLocator = require("../../../bridgeLocator.js");
 const MessagePatterns = require("./patterns/MessagePatterns.js");
 const MessageCleaner = require("./utils/MessageCleaner.js");
 
+/**
+ * ChatParser - Parses chat messages from Minecraft
+ * 
+ * Handles message detection, parsing, and classification for all
+ * chat-related messages on Minecraft servers.
+ * 
+ * @class
+ */
 class ChatParser {
+    /**
+     * Initialize the chat parser
+     * 
+     * Sets up:
+     * - Configuration from main bridge
+     * - Chat parser configuration
+     * - MessagePatterns instance for pattern matching
+     * - MessageCleaner instance for message normalization
+     * 
+     * @example
+     * const parser = new ChatParser();
+     * const message = parser.parseMessage(rawMessage, guildConfig);
+     */
     constructor() {
         const mainBridge = BridgeLocator.getInstance();
         this.config = mainBridge.config;
@@ -17,9 +95,45 @@ class ChatParser {
 
     /**
      * Parse a raw Minecraft message
+     * 
+     * Main entry point for message parsing. Processes raw Minecraft messages
+     * through cleaning, filtering, and pattern matching to create structured results.
+     * 
+     * Processing pipeline:
+     * 1. Clean and normalize message text
+     * 2. Check ignore patterns
+     * 3. Attempt guild chat parsing (guild + officer)
+     * 4. Attempt other message type parsing (private, party, system)
+     * 5. Return unknown result if no matches
+     * 
+     * Message classification priority:
+     * 1. Ignored messages (filter patterns)
+     * 2. Guild chat (guild + officer)
+     * 3. Private messages
+     * 4. Party messages
+     * 5. System messages
+     * 6. Unknown messages
+     * 
      * @param {string|object} rawMessage - Raw message from Minecraft client
      * @param {object} guildConfig - Guild configuration
-     * @returns {object} Parsed message object
+     * @param {string} guildConfig.id - Guild ID
+     * @param {string} guildConfig.name - Guild name
+     * @param {string} guildConfig.tag - Guild tag
+     * @returns {object} Parsed message object with type and data
+     * 
+     * @example
+     * const result = parser.parseMessage(
+     *   "Guild > [MVP+] Player: Hello!",
+     *   guildConfig
+     * );
+     * // Returns: { type: 'guild_chat', chatType: 'guild', username: 'Player', ... }
+     * 
+     * @example
+     * const result = parser.parseMessage(
+     *   "Officer > Admin: Secret info",
+     *   guildConfig
+     * );
+     * // Returns: { type: 'guild_chat', chatType: 'officer', username: 'Admin', ... }
      */
     parseMessage(rawMessage, guildConfig) {
         const startTime = Date.now();
@@ -60,9 +174,32 @@ class ChatParser {
 
     /**
      * Parse guild chat message (guild and officer chat)
+     * 
+     * Attempts to parse message as either regular guild chat or officer chat.
+     * Uses MessagePatterns to match against known guild/officer patterns.
+     * 
+     * Processing:
+     * 1. Try guild message patterns (Guild > username: message)
+     * 2. Try officer message patterns (Officer > username: message)
+     * 3. Return null if neither matches
+     * 
      * @param {string} messageText - Cleaned message text
      * @param {object} guildConfig - Guild configuration
-     * @returns {object|null} Parsed guild message or null
+     * @returns {object|null} Parsed guild/officer message or null if no match
+     * 
+     * @example
+     * const result = parser.parseGuildChatMessage(
+     *   "Guild > Player: Hello",
+     *   guildConfig
+     * );
+     * // Returns: { type: 'guild_chat', chatType: 'guild', ... }
+     * 
+     * @example
+     * const result = parser.parseGuildChatMessage(
+     *   "Officer > Admin: Plans",
+     *   guildConfig
+     * );
+     * // Returns: { type: 'guild_chat', chatType: 'officer', isOfficerChat: true, ... }
      */
     parseGuildChatMessage(messageText, guildConfig) {
         // Try guild message patterns
@@ -82,9 +219,26 @@ class ChatParser {
 
     /**
      * Parse other message types (private, party, system, etc.)
+     * 
+     * Attempts to parse message as private message, party message, or system message.
+     * Used as fallback after guild chat parsing fails.
+     * 
+     * Processing priority:
+     * 1. Private message patterns (From/To username: message)
+     * 2. Party message patterns (Party > username: message)
+     * 3. System message patterns (server notifications)
+     * 4. Return null if none match
+     * 
      * @param {string} messageText - Cleaned message text
      * @param {object} guildConfig - Guild configuration
-     * @returns {object|null} Parsed message or null
+     * @returns {object|null} Parsed message or null if no match
+     * 
+     * @example
+     * const result = parser.parseOtherMessageTypes(
+     *   "From Player: Hi there",
+     *   guildConfig
+     * );
+     * // Returns: { type: 'private_message', direction: 'from', ... }
      */
     parseOtherMessageTypes(messageText, guildConfig) {
         // Try private message patterns
@@ -110,8 +264,16 @@ class ChatParser {
 
     /**
      * Check if message should be ignored
-     * @param {string} messageText - Message text
+     * 
+     * Uses MessagePatterns ignore patterns to filter out unwanted messages
+     * like spam, advertisements, or specific content patterns.
+     * 
+     * @param {string} messageText - Cleaned message text
      * @returns {boolean} Whether to ignore the message
+     * 
+     * @example
+     * const shouldIgnore = parser.shouldIgnoreMessage("Advertisement spam");
+     * // Returns: true if matches ignore pattern
      */
     shouldIgnoreMessage(messageText) {
         return this._patterns.shouldIgnore(messageText);
@@ -121,10 +283,33 @@ class ChatParser {
 
     /**
      * Create guild message result
-     * @param {object} match - Pattern match result
-     * @param {string} rawText - Original message text
+     * 
+     * Constructs a structured result for regular guild chat messages.
+     * Includes username, cleaned message content, rank, and metadata.
+     * 
+     * Result structure:
+     * - type: 'guild_chat'
+     * - chatType: 'guild'
+     * - username: Sender's username
+     * - message: Cleaned message content
+     * - rank: User's rank (if available)
+     * - messageCategory: 'chat'
+     * - parsed: Original match data
+     * 
+     * @param {object} match - Pattern match result from MessagePatterns
+     * @param {string} match.username - Sender username
+     * @param {string} match.message - Message content
+     * @param {string} [match.rank] - User rank
+     * @param {string} rawText - Original cleaned message text
      * @param {object} guildConfig - Guild configuration
-     * @returns {object} Guild message result
+     * @returns {object} Structured guild message result
+     * 
+     * @example
+     * const result = parser.createGuildMessageResult(
+     *   { username: 'Player', message: 'Hello', rank: 'MVP+' },
+     *   "Guild > [MVP+] Player: Hello",
+     *   guildConfig
+     * );
      */
     createGuildMessageResult(match, rawText, guildConfig) {
         const baseResult = this.createBaseMessageResult('guild_chat', rawText, guildConfig);
@@ -147,10 +332,34 @@ class ChatParser {
 
     /**
      * Create officer message result
-     * @param {object} match - Pattern match result
-     * @param {string} rawText - Original message text
+     * 
+     * Constructs a structured result for officer chat messages.
+     * Similar to guild messages but with chatType: 'officer' and isOfficerChat flag.
+     * 
+     * Result structure:
+     * - type: 'guild_chat'
+     * - chatType: 'officer'
+     * - username: Sender's username
+     * - message: Cleaned message content
+     * - rank: User's rank (if available)
+     * - messageCategory: 'chat'
+     * - isOfficerChat: true (distinguishes from guild chat)
+     * - parsed: Original match data
+     * 
+     * @param {object} match - Pattern match result from MessagePatterns
+     * @param {string} match.username - Sender username
+     * @param {string} match.message - Message content
+     * @param {string} [match.rank] - User rank
+     * @param {string} rawText - Original cleaned message text
      * @param {object} guildConfig - Guild configuration
-     * @returns {object} Officer message result
+     * @returns {object} Structured officer message result
+     * 
+     * @example
+     * const result = parser.createOfficerMessageResult(
+     *   { username: 'Admin', message: 'Secret plans', rank: 'Officer' },
+     *   "Officer > [Officer] Admin: Secret plans",
+     *   guildConfig
+     * );
      */
     createOfficerMessageResult(match, rawText, guildConfig) {
         const baseResult = this.createBaseMessageResult('guild_chat', rawText, guildConfig);
@@ -174,10 +383,33 @@ class ChatParser {
 
     /**
      * Create private message result
-     * @param {object} match - Pattern match result
-     * @param {string} rawText - Original message text
+     * 
+     * Constructs a structured result for private/whisper messages.
+     * Includes direction flag to distinguish incoming vs outgoing messages.
+     * 
+     * Result structure:
+     * - type: 'private_message'
+     * - chatType: 'private'
+     * - username: Other party's username
+     * - message: Cleaned message content
+     * - direction: 'from' (incoming) or 'to' (outgoing)
+     * - messageCategory: 'private'
+     * - parsed: Original match data
+     * 
+     * @param {object} match - Pattern match result from MessagePatterns
+     * @param {string} match.username - Other party's username
+     * @param {string} match.message - Message content
+     * @param {string} match.direction - Message direction ('from' or 'to')
+     * @param {string} rawText - Original cleaned message text
      * @param {object} guildConfig - Guild configuration
-     * @returns {object} Private message result
+     * @returns {object} Structured private message result
+     * 
+     * @example
+     * const result = parser.createPrivateMessageResult(
+     *   { username: 'Friend', message: 'Hi', direction: 'from' },
+     *   "From Friend: Hi",
+     *   guildConfig
+     * );
      */
     createPrivateMessageResult(match, rawText, guildConfig) {
         const baseResult = this.createBaseMessageResult('private_message', rawText, guildConfig);
@@ -200,10 +432,30 @@ class ChatParser {
 
     /**
      * Create party message result
-     * @param {object} match - Pattern match result
-     * @param {string} rawText - Original message text
+     * 
+     * Constructs a structured result for party chat messages.
+     * 
+     * Result structure:
+     * - type: 'party_message'
+     * - chatType: 'party'
+     * - username: Sender's username
+     * - message: Cleaned message content
+     * - messageCategory: 'party'
+     * - parsed: Original match data
+     * 
+     * @param {object} match - Pattern match result from MessagePatterns
+     * @param {string} match.username - Sender username
+     * @param {string} match.message - Message content
+     * @param {string} rawText - Original cleaned message text
      * @param {object} guildConfig - Guild configuration
-     * @returns {object} Party message result
+     * @returns {object} Structured party message result
+     * 
+     * @example
+     * const result = parser.createPartyMessageResult(
+     *   { username: 'PartyMember', message: 'Ready?' },
+     *   "Party > PartyMember: Ready?",
+     *   guildConfig
+     * );
      */
     createPartyMessageResult(match, rawText, guildConfig) {
         const baseResult = this.createBaseMessageResult('party_message', rawText, guildConfig);
@@ -224,10 +476,30 @@ class ChatParser {
 
     /**
      * Create system message result
-     * @param {object} match - Pattern match result
-     * @param {string} rawText - Original message text
+     * 
+     * Constructs a structured result for system messages and notifications.
+     * System messages don't have a username but include systemType classification.
+     * 
+     * Result structure:
+     * - type: 'system_message'
+     * - chatType: 'system'
+     * - messageCategory: 'system'
+     * - systemType: Type of system message
+     * - parsed: Original match data with system-specific fields
+     * 
+     * @param {object} match - Pattern match result from MessagePatterns
+     * @param {string} match.systemType - Type of system message
+     * @param {object} [match.data] - System message data
+     * @param {string} rawText - Original cleaned message text
      * @param {object} guildConfig - Guild configuration
-     * @returns {object} System message result
+     * @returns {object} Structured system message result
+     * 
+     * @example
+     * const result = parser.createSystemMessageResult(
+     *   { systemType: 'server_restart', data: { minutes: 5 } },
+     *   "Server restarting in 5 minutes",
+     *   guildConfig
+     * );
      */
     createSystemMessageResult(match, rawText, guildConfig) {
         const baseResult = this.createBaseMessageResult('system_message', rawText, guildConfig);
@@ -247,9 +519,26 @@ class ChatParser {
 
     /**
      * Create ignored message result
+     * 
+     * Constructs result for messages that match ignore patterns.
+     * Minimal structure since these messages are filtered out.
+     * 
+     * Result structure:
+     * - type: 'ignored'
+     * - raw: Original message text
+     * - reason: Why message was ignored
+     * - timestamp: Unix timestamp
+     * - parsedSuccessfully: false
+     * 
      * @param {string} rawText - Original message text
-     * @param {string} reason - Reason for ignoring
+     * @param {string} reason - Reason for ignoring the message
      * @returns {object} Ignored message result
+     * 
+     * @example
+     * const result = parser.createIgnoredMessageResult(
+     *   "Spam advertisement",
+     *   'filtered_content'
+     * );
      */
     createIgnoredMessageResult(rawText, reason) {        
         return {
@@ -263,9 +552,26 @@ class ChatParser {
 
     /**
      * Create unknown message result
+     * 
+     * Constructs result for messages that don't match any pattern.
+     * Includes full base metadata for debugging purposes.
+     * 
+     * Result structure:
+     * - type: 'unknown'
+     * - raw: Original message text
+     * - reason: 'no_pattern_match'
+     * - parsedSuccessfully: false
+     * - Full base metadata (guildId, timestamp, etc.)
+     * 
      * @param {string} rawText - Original message text
      * @param {object} guildConfig - Guild configuration
      * @returns {object} Unknown message result
+     * 
+     * @example
+     * const result = parser.createUnknownMessageResult(
+     *   "Unrecognized format",
+     *   guildConfig
+     * );
      */
     createUnknownMessageResult(rawText, guildConfig) {        
         const baseResult = this.createBaseMessageResult('unknown', rawText, guildConfig);
@@ -283,10 +589,29 @@ class ChatParser {
 
     /**
      * Create error message result
+     * 
+     * Constructs result when parsing throws an exception.
+     * Includes error details for debugging and monitoring.
+     * 
+     * Result structure:
+     * - type: 'error'
+     * - raw: Original raw message
+     * - error: { message, stack }
+     * - guildId, guildName: Guild identifiers
+     * - timestamp: Unix timestamp
+     * - parsedSuccessfully: false
+     * 
      * @param {string} rawMessage - Original raw message
-     * @param {Error} error - Error that occurred
+     * @param {Error} error - Error that occurred during parsing
      * @param {object} guildConfig - Guild configuration
      * @returns {object} Error message result
+     * 
+     * @example
+     * const result = parser.createErrorMessageResult(
+     *   rawMessage,
+     *   new Error('Pattern matching failed'),
+     *   guildConfig
+     * );
      */
     createErrorMessageResult(rawMessage, error, guildConfig) {
         return {
@@ -305,10 +630,30 @@ class ChatParser {
 
     /**
      * Create base message result with common properties
-     * @param {string} type - Message type
-     * @param {string} rawText - Original message text
+     * 
+     * Constructs the base structure shared by all successful message results.
+     * Contains metadata about the message, guild, and parser.
+     * 
+     * Base structure:
+     * - type: Message type
+     * - raw: Cleaned message text
+     * - guildId, guildName, guildTag: Guild identifiers
+     * - timestamp: Unix timestamp
+     * - parsedSuccessfully: true (for successful parses)
+     * - parser: 'ChatParser'
+     * - parserVersion: '2.0.0'
+     * 
+     * @param {string} type - Message type identifier
+     * @param {string} rawText - Cleaned message text
      * @param {object} guildConfig - Guild configuration
-     * @returns {object} Base message result
+     * @returns {object} Base message result structure
+     * 
+     * @example
+     * const base = parser.createBaseMessageResult(
+     *   'guild_chat',
+     *   "Guild > Player: Hello",
+     *   guildConfig
+     * );
      */
     createBaseMessageResult(type, rawText, guildConfig) {
         return {
@@ -328,9 +673,18 @@ class ChatParser {
 
     /**
      * Check if a message is a guild chat message (for external use)
-     * @param {string|object} rawMessage - Raw message
+     * 
+     * Quick check method to determine if a message is guild chat
+     * without needing to inspect the full parse result.
+     * 
+     * @param {string|object} rawMessage - Raw message to check
      * @param {object} guildConfig - Guild configuration
-     * @returns {boolean} Whether message is guild chat
+     * @returns {boolean} Whether message is guild chat (guild or officer)
+     * 
+     * @example
+     * if (parser.isGuildMessage(message, guildConfig)) {
+     *   console.log('This is a guild chat message');
+     * }
      */
     isGuildMessage(rawMessage, guildConfig) {
         try {
@@ -344,7 +698,15 @@ class ChatParser {
 
     /**
      * Get current configuration
-     * @returns {object} Current configuration
+     * 
+     * Provides access to the parser's configuration for inspection
+     * or modification.
+     * 
+     * @returns {object} Current parser configuration
+     * 
+     * @example
+     * const config = parser.getChatParserConfig();
+     * console.log(config.enableDebugLogging);
      */
     getChatParserConfig() {
         return this.config;
@@ -352,7 +714,15 @@ class ChatParser {
 
     /**
      * Get pattern matcher for external access
+     * 
+     * Provides access to the MessagePatterns instance for external
+     * pattern management, testing, or inspection.
+     * 
      * @returns {MessagePatterns} Pattern matcher instance
+     * 
+     * @example
+     * const patterns = parser.getPatterns();
+     * const customPatterns = patterns.getCustomPatterns('guild');
      */
     getPatterns() {
         return this._patterns;
@@ -360,7 +730,15 @@ class ChatParser {
 
     /**
      * Get message cleaner for external access
+     * 
+     * Provides access to the MessageCleaner instance for external
+     * message cleaning operations.
+     * 
      * @returns {MessageCleaner} Message cleaner instance
+     * 
+     * @example
+     * const cleaner = parser.getCleaner();
+     * const cleaned = cleaner.cleanMessage(rawMessage);
      */
     getCleaner() {
         return this._cleaner;

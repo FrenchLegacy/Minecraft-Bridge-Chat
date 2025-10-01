@@ -1,8 +1,80 @@
+/**
+ * Message Formatter - Template-Based Message and Event Formatting System
+ * 
+ * This class provides a centralized system for formatting messages and events when bridging
+ * between Minecraft guilds and Discord. It uses a template-based approach with variable
+ * substitution to create consistent, customizable message formats across different platforms
+ * and server types.
+ * 
+ * The formatter provides:
+ * - Template-based message formatting with variable substitution
+ * - Support for multiple platforms (Minecraft, Discord)
+ * - Server-specific template selection (Hypixel, Vanilla, etc.)
+ * - Guild message formatting with source/target awareness
+ * - Event formatting for all guild event types
+ * - System message formatting
+ * - Platform-specific post-processing (character limits, markdown handling)
+ * - Fallback message generation when templates fail
+ * - Performance caching for frequently formatted messages
+ * - Configurable tag display and formatting options
+ * 
+ * Template variable system:
+ * - Message variables: username, message, chatType, rank, guildName, guildTag, timestamp
+ * - Event variables: eventType, username, toRank, fromRank, level, motd, promoter, demoter
+ * - Guild variables: sourceGuildName, targetGuildName, sourceGuildTag, targetGuildTag
+ * - Conditional variables: tag (based on showTags config)
+ * 
+ * Configuration options:
+ * - showTags: Display guild tags in messages (default: false)
+ * - showSourceTag: Show source guild tag prefix (default: true)
+ * - enableDebugLogging: Enable detailed format logging (default: false)
+ * - maxMessageLength: Maximum message length (default: 256)
+ * - fallbackToBasic: Use fallback formatting on template failure (default: true)
+ * 
+ * Platform-specific processing:
+ * - Minecraft: Character limit enforcement, Discord markdown removal
+ * - Discord: Extended character limit (2000), markdown preservation
+ * 
+ * @author Fabien83560
+ * @version 1.0.0
+ * @license ISC
+ */
+
 // Specific Imports
 const logger = require('./logger');
 const { getTemplateLoader } = require('../config/TemplateLoader.js');
 
+/**
+ * MessageFormatter - Format messages and events using templates
+ * 
+ * Utility class that formats guild messages, events, and system messages using
+ * configurable templates with variable substitution. Handles platform-specific
+ * processing and provides fallback formatting when templates are unavailable.
+ * 
+ * @class
+ */
 class MessageFormatter {
+    /**
+     * Create a new MessageFormatter instance
+     * 
+     * Initializes the formatter with configuration options and sets up the template
+     * loader and performance cache. Default configuration values are applied for any
+     * options not explicitly provided.
+     * 
+     * @param {object} [config={}] - Formatter configuration options
+     * @param {boolean} [config.showTags=false] - Display guild tags in formatted messages
+     * @param {boolean} [config.showSourceTag=true] - Show source guild tag as prefix
+     * @param {boolean} [config.enableDebugLogging=false] - Enable detailed debug logging
+     * @param {number} [config.maxMessageLength=256] - Maximum message length before truncation
+     * @param {boolean} [config.fallbackToBasic=true] - Use fallback formatting on template failure
+     * 
+     * @example
+     * const formatter = new MessageFormatter({
+     *   showTags: true,
+     *   maxMessageLength: 200,
+     *   enableDebugLogging: true
+     * });
+     */
     constructor(config = {}) {
         this.config = {
             showTags: config.showTags || false,
@@ -24,11 +96,42 @@ class MessageFormatter {
 
     /**
      * Format a guild chat message for inter-guild transfer
-     * @param {object} messageData - Parsed message data
+     * 
+     * Formats a guild chat message (guild or officer chat) using appropriate templates
+     * for the target platform and server type. Handles variable substitution, platform-
+     * specific post-processing, and provides fallback formatting on template failure.
+     * 
+     * The method performs:
+     * 1. Variable building from message data and guild configs
+     * 2. Template selection based on platform, server, and chat type
+     * 3. Variable substitution in template
+     * 4. Platform-specific post-processing
+     * 5. Fallback formatting if template unavailable or error occurs
+     * 
+     * @param {object} messageData - Parsed message data from source guild
+     * @param {string} messageData.username - Username of message sender
+     * @param {string} messageData.message - Message content
+     * @param {string} [messageData.chatType='guild'] - Chat type ('guild' or 'officer')
+     * @param {string} [messageData.rank] - Player's guild rank (optional)
      * @param {object} sourceGuildConfig - Source guild configuration
+     * @param {string} sourceGuildConfig.name - Source guild name
+     * @param {string} sourceGuildConfig.tag - Source guild tag
+     * @param {string} sourceGuildConfig.id - Source guild ID
      * @param {object} targetGuildConfig - Target guild configuration
-     * @param {string} platform - Target platform (messagesToMinecraft, messagesToDiscord)
-     * @returns {string|null} Formatted message or null
+     * @param {string} targetGuildConfig.name - Target guild name
+     * @param {object} targetGuildConfig.server - Target server configuration
+     * @param {string} targetGuildConfig.server.serverName - Server type (e.g., 'Hypixel', 'Vanilla')
+     * @param {string} [platform='messagesToMinecraft'] - Target platform ('messagesToMinecraft' or 'messagesToDiscord')
+     * @returns {string|null} Formatted message string or null on failure without fallback
+     * 
+     * @example
+     * const formatted = formatter.formatGuildMessage(
+     *   { username: "Player123", message: "Hello!", chatType: "guild" },
+     *   sourceGuild,
+     *   targetGuild,
+     *   'messagesToMinecraft'
+     * );
+     * // Returns: "[GuildA] Player123: Hello!"
      */
     formatGuildMessage(messageData, sourceGuildConfig, targetGuildConfig, platform = 'messagesToMinecraft') {
         try {
@@ -63,11 +166,46 @@ class MessageFormatter {
 
     /**
      * Format a guild event for inter-guild transfer
-     * @param {object} eventData - Parsed event data
+     * 
+     * Formats a guild event (join, leave, promote, demote, etc.) using appropriate
+     * event templates for the target platform and server type. Handles event-specific
+     * variable building and provides fallback formatting.
+     * 
+     * Supported event types:
+     * - join/welcome: Player joining guild
+     * - leave: Player leaving guild
+     * - kick: Player kicked from guild
+     * - promote: Player promoted with rank change
+     * - demote: Player demoted with rank change
+     * - level: Guild level up
+     * - motd: MOTD change
+     * - invite: Guild invitation
+     * 
+     * @param {object} eventData - Parsed event data from source guild
+     * @param {string} eventData.type - Event type identifier
+     * @param {string} [eventData.username] - Username involved in event
+     * @param {string} [eventData.toRank] - New rank (promote/demote)
+     * @param {string} [eventData.fromRank] - Previous rank (promote/demote)
+     * @param {number} [eventData.level] - Guild level (level event)
+     * @param {string} [eventData.motd] - New MOTD (motd event)
+     * @param {string} [eventData.reason] - Kick/leave reason
      * @param {object} sourceGuildConfig - Source guild configuration
+     * @param {string} sourceGuildConfig.name - Source guild name
+     * @param {string} sourceGuildConfig.tag - Source guild tag
      * @param {object} targetGuildConfig - Target guild configuration
-     * @param {string} platform - Target platform (messagesToMinecraft, messagesToDiscord)
-     * @returns {string|null} Formatted event message or null
+     * @param {object} targetGuildConfig.server - Target server configuration
+     * @param {string} targetGuildConfig.server.serverName - Server type
+     * @param {string} [platform='messagesToMinecraft'] - Target platform
+     * @returns {string|null} Formatted event message or null on failure without fallback
+     * 
+     * @example
+     * const formatted = formatter.formatGuildEvent(
+     *   { type: "promote", username: "Player123", fromRank: "Member", toRank: "Officer" },
+     *   sourceGuild,
+     *   targetGuild,
+     *   'messagesToDiscord'
+     * );
+     * // Returns: "[GuildA] Player123 was promoted to Officer!"
      */
     formatGuildEvent(eventData, sourceGuildConfig, targetGuildConfig, platform = 'messagesToMinecraft') {
         try {
@@ -101,11 +239,31 @@ class MessageFormatter {
 
     /**
      * Format a system message
-     * @param {string} type - System message type
+     * 
+     * Formats system messages and notifications using system templates. System messages
+     * are used for internal notifications, status updates, and other non-chat content.
+     * 
+     * @param {string} type - System message type identifier
      * @param {object} data - System message data
+     * @param {string} [data.message] - Message content
+     * @param {*} [data.*] - Additional type-specific data properties
      * @param {object} guildConfig - Guild configuration
-     * @param {string} platform - Target platform
-     * @returns {string|null} Formatted system message or null
+     * @param {string} guildConfig.name - Guild name
+     * @param {string} guildConfig.tag - Guild tag
+     * @param {string} guildConfig.id - Guild ID
+     * @param {object} guildConfig.server - Server configuration
+     * @param {string} guildConfig.server.serverName - Server type
+     * @param {string} [platform='messagesToMinecraft'] - Target platform
+     * @returns {string|null} Formatted system message or fallback string
+     * 
+     * @example
+     * const formatted = formatter.formatSystemMessage(
+     *   'connection',
+     *   { status: 'connected', attempt: 1 },
+     *   guildConfig,
+     *   'messagesToDiscord'
+     * );
+     * // Returns: "[SYSTEM] Guild MyGuild connected (attempt 1)"
      */
     formatSystemMessage(type, data, guildConfig, platform = 'messagesToMinecraft') {
         try {
@@ -139,10 +297,34 @@ class MessageFormatter {
 
     /**
      * Build variables for message formatting
+     * 
+     * Constructs a complete variables object for message template substitution.
+     * Includes message data, source/target guild information, timestamps, and
+     * conditional tag display based on configuration.
+     * 
      * @param {object} messageData - Parsed message data
+     * @param {string} messageData.username - Message sender username
+     * @param {string} messageData.message - Message content
+     * @param {string} [messageData.chatType='guild'] - Chat type
+     * @param {string} [messageData.rank] - Player rank (optional)
      * @param {object} sourceGuildConfig - Source guild configuration
+     * @param {string} sourceGuildConfig.name - Source guild name
+     * @param {string} sourceGuildConfig.tag - Source guild tag
+     * @param {string} sourceGuildConfig.id - Source guild ID
      * @param {object} targetGuildConfig - Target guild configuration
-     * @returns {object} Variables object
+     * @param {string} targetGuildConfig.name - Target guild name
+     * @param {string} targetGuildConfig.tag - Target guild tag
+     * @param {string} targetGuildConfig.id - Target guild ID
+     * @returns {object} Variables object for template substitution
+     * 
+     * @example
+     * const variables = formatter.buildMessageVariables(
+     *   { username: "Player", message: "Hi", chatType: "guild" },
+     *   sourceGuild,
+     *   targetGuild
+     * );
+     * // Returns: { username: "Player", message: "Hi", chatType: "guild", 
+     * //            sourceGuildName: "GuildA", targetGuildName: "GuildB", ... }
      */
     buildMessageVariables(messageData, sourceGuildConfig, targetGuildConfig) {
         const variables = {
@@ -183,10 +365,41 @@ class MessageFormatter {
 
     /**
      * Build variables for event formatting
+     * 
+     * Constructs a complete variables object for event template substitution.
+     * Includes event type, username, guild information, and event-specific data
+     * based on the event type (rank changes, levels, MOTD, etc.).
+     * 
+     * Event-specific variables by type:
+     * - join/welcome: Basic event info only
+     * - leave: reason (optional)
+     * - kick: reason (optional)
+     * - promote: toRank, fromRank, promoter (optional)
+     * - demote: toRank, fromRank, demoter (optional)
+     * - level: level, previousLevel
+     * - motd: changer, motd
+     * - invite: inviter, invited
+     * 
      * @param {object} eventData - Parsed event data
+     * @param {string} eventData.type - Event type
+     * @param {string} [eventData.username] - Username involved
      * @param {object} sourceGuildConfig - Source guild configuration
+     * @param {string} sourceGuildConfig.name - Source guild name
+     * @param {string} sourceGuildConfig.tag - Source guild tag
+     * @param {string} sourceGuildConfig.id - Source guild ID
      * @param {object} targetGuildConfig - Target guild configuration
-     * @returns {object} Variables object
+     * @param {string} targetGuildConfig.name - Target guild name
+     * @param {string} targetGuildConfig.tag - Target guild tag
+     * @param {string} targetGuildConfig.id - Target guild ID
+     * @returns {object} Variables object for template substitution
+     * 
+     * @example
+     * const variables = formatter.buildEventVariables(
+     *   { type: "promote", username: "Player", fromRank: "Member", toRank: "Officer" },
+     *   sourceGuild,
+     *   targetGuild
+     * );
+     * // Returns: { eventType: "promote", username: "Player", toRank: "Officer", ... }
      */
     buildEventVariables(eventData, sourceGuildConfig, targetGuildConfig) {
         const variables = {
@@ -283,10 +496,26 @@ class MessageFormatter {
 
     /**
      * Build variables for system message formatting
+     * 
+     * Constructs a variables object for system message template substitution.
+     * Includes system message type, guild information, timestamps, and all
+     * non-object properties from the data parameter.
+     * 
      * @param {string} type - System message type
      * @param {object} data - System message data
      * @param {object} guildConfig - Guild configuration
-     * @returns {object} Variables object
+     * @param {string} guildConfig.name - Guild name
+     * @param {string} guildConfig.tag - Guild tag
+     * @param {string} guildConfig.id - Guild ID
+     * @returns {object} Variables object for template substitution
+     * 
+     * @example
+     * const variables = formatter.buildSystemVariables(
+     *   'status',
+     *   { connected: true, attempt: 1 },
+     *   guildConfig
+     * );
+     * // Returns: { type: "status", connected: true, attempt: 1, guildName: "...", ... }
      */
     buildSystemVariables(type, data, guildConfig) {
         const variables = {
@@ -312,9 +541,30 @@ class MessageFormatter {
 
     /**
      * Substitute variables in template string
+     * 
+     * Performs variable substitution on a template string by replacing {variableName}
+     * placeholders with actual values from the variables object. Falls back to default
+     * placeholder values if a variable is not found. Keeps original placeholder if
+     * neither variable nor default exists.
+     * 
+     * Placeholder format: {variableName}
+     * 
      * @param {string} template - Template string with {variable} placeholders
-     * @param {object} variables - Variables to substitute
-     * @returns {string} String with substituted variables
+     * @param {object} variables - Variables to substitute into template
+     * @returns {string} String with variables substituted
+     * 
+     * @example
+     * const template = "{username} says: {message}";
+     * const variables = { username: "Player123", message: "Hello!" };
+     * const result = formatter.substituteVariables(template, variables);
+     * // Returns: "Player123 says: Hello!"
+     * 
+     * @example
+     * // With missing variable
+     * const template = "User: {username}, Level: {level}";
+     * const variables = { username: "Player123" };
+     * const result = formatter.substituteVariables(template, variables);
+     * // Returns: "User: Player123, Level: {level}" (or default if defined)
      */
     substituteVariables(template, variables) {
         if (!template || typeof template !== 'string') {
@@ -341,9 +591,24 @@ class MessageFormatter {
 
     /**
      * Post-process message based on platform
-     * @param {string} message - Formatted message
-     * @param {string} platform - Target platform
-     * @returns {string} Post-processed message
+     * 
+     * Performs platform-specific post-processing on formatted messages including:
+     * - Cleanup: Remove empty tags/brackets, normalize whitespace
+     * - Minecraft: Character limit enforcement, Discord markdown removal
+     * - Discord: Extended character limit, markdown preservation
+     * 
+     * Character limits:
+     * - Minecraft: config.maxMessageLength (default 256)
+     * - Discord: min(config.maxMessageLength, 2000)
+     * 
+     * @param {string} message - Formatted message to post-process
+     * @param {string} platform - Target platform ('messagesToMinecraft' or 'messagesToDiscord')
+     * @returns {string} Post-processed message ready for delivery
+     * 
+     * @example
+     * const message = "  [GuildA]  Player123  : Hello!  ";
+     * const processed = formatter.postProcessMessage(message, 'messagesToMinecraft');
+     * // Returns: "[GuildA] Player123 : Hello!" (cleaned, markdown removed if any)
      */
     postProcessMessage(message, platform) {
         if (!message) return message;
@@ -381,8 +646,27 @@ class MessageFormatter {
 
     /**
      * Remove Discord markdown formatting
+     * 
+     * Strips all Discord markdown formatting from text, converting formatted text
+     * to plain text. Used when sending Discord messages to Minecraft where markdown
+     * is not supported and would display as raw syntax.
+     * 
+     * Removed markdown types:
+     * - Bold: **text** → text
+     * - Italic: *text* → text
+     * - Underline: __text__ → text
+     * - Strikethrough: ~~text~~ → text
+     * - Inline code: `code` → code
+     * - Code blocks: ```code``` → (removed entirely)
+     * - Spoilers: ||text|| → text
+     * 
      * @param {string} text - Text with Discord markdown
-     * @returns {string} Text without markdown
+     * @returns {string} Text without any markdown formatting
+     * 
+     * @example
+     * const marked = "**Bold** and *italic* with `code`";
+     * const plain = formatter.removeDiscordMarkdown(marked);
+     * // Returns: "Bold and italic with code"
      */
     removeDiscordMarkdown(text) {
         if (!text || typeof text !== 'string') {
@@ -401,9 +685,26 @@ class MessageFormatter {
 
     /**
      * Create fallback message when template fails
+     * 
+     * Generates a simple fallback message format when template loading or formatting
+     * fails. Uses basic string concatenation with optional tag display based on
+     * configuration. Returns null if fallbackToBasic is disabled.
+     * 
+     * Fallback format: [SourceTag] username [tag]: message
+     * 
      * @param {object} messageData - Message data
-     * @param {object} sourceGuildConfig - Source guild config
-     * @returns {string} Fallback message
+     * @param {string} messageData.username - Username of sender
+     * @param {string} messageData.message - Message content
+     * @param {object} sourceGuildConfig - Source guild configuration
+     * @param {string} sourceGuildConfig.tag - Source guild tag
+     * @returns {string|null} Fallback message or null if disabled
+     * 
+     * @example
+     * const fallback = formatter.createFallbackMessage(
+     *   { username: "Player", message: "Hi!" },
+     *   { tag: "GLD" }
+     * );
+     * // Returns: "[GLD] Player: Hi!" (if showSourceTag is true)
      */
     createFallbackMessage(messageData, sourceGuildConfig) {
         if (!this.config.fallbackToBasic) {
@@ -418,9 +719,35 @@ class MessageFormatter {
 
     /**
      * Create fallback event message when template fails
+     * 
+     * Generates a simple fallback event message format when event template loading
+     * or formatting fails. Provides basic event descriptions with optional guild tag
+     * display. Returns null if fallbackToBasic is disabled.
+     * 
+     * Supported fallback events:
+     * - welcome: "username joined the guild!"
+     * - leave: "username left the guild"
+     * - kick: "username was kicked from the guild"
+     * - promote: "username was promoted to rank"
+     * - demote: "username was demoted to rank"
+     * - level: "Guild reached level X!"
+     * - default: "unknown_event_type"
+     * 
      * @param {object} eventData - Event data
-     * @param {object} sourceGuildConfig - Source guild config
-     * @returns {string} Fallback event message
+     * @param {string} eventData.type - Event type
+     * @param {string} [eventData.username] - Username involved
+     * @param {string} [eventData.toRank] - New rank (promote/demote)
+     * @param {number} [eventData.level] - Guild level (level event)
+     * @param {object} sourceGuildConfig - Source guild configuration
+     * @param {string} sourceGuildConfig.tag - Source guild tag
+     * @returns {string|null} Fallback event message or null if disabled
+     * 
+     * @example
+     * const fallback = formatter.createFallbackEventMessage(
+     *   { type: "promote", username: "Player", toRank: "Officer" },
+     *   { tag: "GLD" }
+     * );
+     * // Returns: "[GLD] Player was promoted to Officer"
      */
     createFallbackEventMessage(eventData, sourceGuildConfig) {
         if (!this.config.fallbackToBasic) {
@@ -450,7 +777,22 @@ class MessageFormatter {
 
     /**
      * Update formatter configuration
-     * @param {object} newConfig - New configuration options
+     * 
+     * Dynamically updates the formatter's configuration by merging new options with
+     * existing configuration. Clears the format cache to ensure new configuration
+     * takes effect immediately for all subsequent formatting operations.
+     * 
+     * @param {object} newConfig - New configuration options to merge
+     * @param {boolean} [newConfig.showTags] - Update tag display setting
+     * @param {boolean} [newConfig.showSourceTag] - Update source tag prefix setting
+     * @param {number} [newConfig.maxMessageLength] - Update max message length
+     * @param {boolean} [newConfig.enableDebugLogging] - Update debug logging
+     * 
+     * @example
+     * formatter.updateConfig({
+     *   showTags: true,
+     *   maxMessageLength: 300
+     * });
      */
     updateConfig(newConfig) {
         this.config = { ...this.config, ...newConfig };
@@ -461,7 +803,22 @@ class MessageFormatter {
 
     /**
      * Get current configuration
-     * @returns {object} Current configuration
+     * 
+     * Returns a copy of the current formatter configuration object. Useful for
+     * inspecting current settings or creating derivative formatters with similar
+     * configuration.
+     * 
+     * @returns {object} Current configuration (copy)
+     * @returns {boolean} return.showTags - Display guild tags setting
+     * @returns {boolean} return.showSourceTag - Show source tag prefix setting
+     * @returns {boolean} return.enableDebugLogging - Debug logging enabled
+     * @returns {number} return.maxMessageLength - Maximum message length
+     * @returns {boolean} return.fallbackToBasic - Fallback formatting enabled
+     * 
+     * @example
+     * const config = formatter.getConfig();
+     * console.log(`Max length: ${config.maxMessageLength}`);
+     * console.log(`Tags enabled: ${config.showTags}`);
      */
     getConfig() {
         return { ...this.config };
@@ -469,6 +826,15 @@ class MessageFormatter {
 
     /**
      * Clear formatting cache
+     * 
+     * Clears the internal performance cache used for storing formatted messages.
+     * Useful when templates are reloaded or configuration changes require fresh
+     * formatting of all messages.
+     * 
+     * @example
+     * // After reloading templates
+     * templateLoader.reload();
+     * formatter.clearCache();
      */
     clearCache() {
         this.formatCache.clear();

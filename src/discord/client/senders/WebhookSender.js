@@ -1,3 +1,45 @@
+/**
+ * Webhook Sender - Discord Webhook Message Relay System
+ * 
+ * This file handles sending Minecraft messages to Discord channels using webhooks.
+ * Webhooks allow messages to appear with custom usernames and avatars, making the
+ * bridge experience more immersive by displaying Minecraft player names and skins
+ * directly in Discord instead of showing messages from a single bot account.
+ * 
+ * The sender provides:
+ * - Webhook management for chat and staff channels
+ * - Automatic webhook creation with proper permissions
+ * - Message formatting with custom usernames and avatars
+ * - Minecraft skin avatar integration (via Minotar API)
+ * - Avatar caching system to reduce API calls
+ * - Guild tag support for multi-guild setups
+ * - Security features (disabled mentions)
+ * - Thread support compatibility
+ * - Dynamic configuration updates
+ * 
+ * Webhook Benefits:
+ * - Messages appear with Minecraft player names
+ * - Player skins shown as Discord avatars
+ * - More natural conversation flow
+ * - Better visual distinction between players
+ * - Supports guild tags for multi-guild bridging
+ * 
+ * Avatar System:
+ * - Uses configurable avatar API (default: Minotar)
+ * - Caches avatars for 5 minutes to reduce API load
+ * - Automatic cache cleanup for expired entries
+ * - Fallback to Steve skin for unknown players
+ * 
+ * Security:
+ * - Disables all mentions by default to prevent abuse
+ * - Requires ManageWebhooks permission for creation
+ * - Validates channel types before webhook operations
+ * 
+ * @author Fabien83560
+ * @version 1.0.0
+ * @license ISC
+ */
+
 // Globals Imports
 const { WebhookClient } = require('discord.js');
 
@@ -5,7 +47,19 @@ const { WebhookClient } = require('discord.js');
 const BridgeLocator = require("../../../bridgeLocator.js");
 const logger = require("../../../shared/logger");
 
+/**
+ * WebhookSender - Manages Discord webhook message delivery
+ * 
+ * Handles webhook initialization, message sending, avatar management, and
+ * provides a seamless integration between Minecraft player identities and Discord.
+ * 
+ * @class
+ */
 class WebhookSender {
+    /**
+     * Create a new WebhookSender instance
+     * Initializes configuration, webhook storage, and avatar caching system
+     */
     constructor() {
         const mainBridge = BridgeLocator.getInstance();
         this.config = mainBridge.config;
@@ -26,6 +80,18 @@ class WebhookSender {
         logger.debug('WebhookSender initialized');
     }
 
+    // ==================== INITIALIZATION ====================
+
+    /**
+     * Initialize with Discord client
+     * 
+     * Sets up webhook clients for chat and staff channels.
+     * Attempts to use configured webhook URLs or creates new webhooks if needed.
+     * 
+     * @async
+     * @param {Client} client - Discord client instance
+     * @throws {Error} If webhook initialization fails
+     */
     async initialize(client) {
         this.client = client;
 
@@ -38,6 +104,15 @@ class WebhookSender {
         }
     }
 
+    /**
+     * Setup webhooks for chat and staff channels
+     * 
+     * Initializes webhook clients from configuration URLs or creates new webhooks
+     * if no URLs are configured. Handles both chat and staff channel webhooks.
+     * 
+     * @async
+     * @private
+     */
     async setupWebhooks() {
         const bridgeConfig = this.config.get('bridge.channels');
 
@@ -70,6 +145,16 @@ class WebhookSender {
         logger.discord(`WebhookSender setup complete - Chat: ${!!this.webhooks.chat}, Staff: ${!!this.webhooks.staff}`);
     }
 
+    /**
+     * Create webhook for a specific channel
+     * 
+     * Creates a new webhook in the specified channel if the bot has ManageWebhooks permission.
+     * Logs the webhook URL that should be added to configuration.
+     * 
+     * @async
+     * @private
+     * @param {string} channelType - Channel type ('chat' or 'staff')
+     */
     async createWebhookForChannel(channelType) {
         try {
             const bridgeConfig = this.config.get('bridge.channels');
@@ -104,13 +189,21 @@ class WebhookSender {
         }
     }
 
+    // ==================== MESSAGE SENDING ====================
+
     /**
      * Send message via webhook
+     * 
+     * Sends a formatted message to Discord using the webhook for the specified channel.
+     * Builds a webhook payload with custom username and avatar, then sends it.
+     * 
+     * @async
      * @param {string} message - Formatted message content
-     * @param {object} messageData - Original message data
-     * @param {object} guildConfig - Guild configuration
-     * @param {string} channelType - Channel type (chat/staff)
-     * @returns {Promise} Send promise
+     * @param {object} messageData - Original message data from Minecraft
+     * @param {object} guildConfig - Guild configuration object
+     * @param {string} channelType - Channel type ('chat' or 'staff')
+     * @returns {Promise<Message>} Sent Discord message
+     * @throws {Error} If webhook is not available or send fails
      */
     async sendMessage(message, messageData, guildConfig, channelType) {
         try {
@@ -137,10 +230,17 @@ class WebhookSender {
 
     /**
      * Build webhook payload
+     * 
+     * Constructs the webhook payload object with formatted content, custom username,
+     * player avatar, and security settings (disabled mentions).
+     * 
+     * @async
+     * @private
      * @param {string} message - Message content
      * @param {object} messageData - Original message data
+     * @param {string} messageData.username - Minecraft username
      * @param {object} guildConfig - Guild configuration
-     * @returns {object} Webhook payload
+     * @returns {Promise<object>} Webhook payload object
      */
     async buildWebhookPayload(message, messageData, guildConfig) {
         const username = messageData.username || 'Unknown';
@@ -163,9 +263,15 @@ class WebhookSender {
 
     /**
      * Format username for webhook display
-     * @param {string} username - Original username
+     * 
+     * Formats the username for display in Discord, optionally adding guild tags
+     * for multi-guild setups when source tagging is enabled.
+     * 
+     * @private
+     * @param {string} username - Original Minecraft username
      * @param {object} guildConfig - Guild configuration
-     * @returns {string} Formatted username
+     * @param {string} guildConfig.tag - Guild tag for display
+     * @returns {string} Formatted username with optional guild tag
      */
     formatWebhookUsername(username, guildConfig) {
         const interGuildConfig = this.config.get('bridge.interGuild');
@@ -178,10 +284,17 @@ class WebhookSender {
         return username;
     }
 
+    // ==================== AVATAR MANAGEMENT ====================
+
     /**
      * Get user avatar URL with caching
+     * 
+     * Retrieves the avatar URL for a Minecraft username, using cached values
+     * when available to reduce API calls. Cache entries expire after 5 minutes.
+     * 
+     * @async
      * @param {string} username - Minecraft username
-     * @returns {string} Avatar URL
+     * @returns {Promise<string>} Avatar URL for the player
      */
     async getUserAvatar(username) {
         if (!username) {
@@ -210,7 +323,11 @@ class WebhookSender {
 
     /**
      * Get default avatar URL
-     * @returns {string} Default avatar URL
+     * 
+     * Returns the default Minecraft Steve avatar URL for use when
+     * a player-specific avatar is not available.
+     * 
+     * @returns {string} Default avatar URL (Steve skin)
      */
     getDefaultAvatar() {
         return 'https://minotar.net/helm/steve/64.png';
@@ -218,6 +335,9 @@ class WebhookSender {
 
     /**
      * Clean up avatar cache
+     * 
+     * Removes expired entries from the avatar cache to prevent memory leaks.
+     * Called periodically to maintain cache efficiency.
      */
     cleanupAvatarCache() {
         const now = Date.now();
@@ -235,9 +355,17 @@ class WebhookSender {
         }
     }
 
+    // ==================== CONFIGURATION ====================
+
     /**
      * Update webhook configuration
+     * 
+     * Updates webhook configuration with new settings. Clears avatar cache
+     * if the avatar API URL has changed to ensure fresh data.
+     * 
+     * @async
      * @param {object} newConfig - New webhook configuration
+     * @param {string} newConfig.avatarAPI - New avatar API URL (optional)
      */
     async updateConfig(newConfig) {
         const oldAvatarAPI = this.avatarAPI;
@@ -254,8 +382,41 @@ class WebhookSender {
         logger.debug('WebhookSender configuration updated');
     }
 
+    // ==================== WEBHOOK ACCESS ====================
+
+    /**
+     * Check if webhook is available for channel type
+     * 
+     * Verifies whether a webhook is configured and available for
+     * the specified channel type.
+     * 
+     * @param {string} channelType - Channel type ('chat' or 'staff')
+     * @returns {boolean} Whether webhook is available
+     */
+    hasWebhook(channelType) {
+        return !!this.webhooks[channelType];
+    }
+
+    /**
+     * Get webhook client for channel type
+     * 
+     * Returns the webhook client for the specified channel type,
+     * or null if no webhook is configured.
+     * 
+     * @param {string} channelType - Channel type ('chat' or 'staff')
+     * @returns {WebhookClient|null} Webhook client or null
+     */
+    getWebhook(channelType) {
+        return this.webhooks[channelType] || null;
+    }
+
+    // ==================== CLEANUP ====================
+
     /**
      * Cleanup resources
+     * 
+     * Clears avatar cache and destroys webhook clients.
+     * Should be called before disposing of the sender instance.
      */
     cleanup() {
         // Clear avatar cache
@@ -275,24 +436,6 @@ class WebhookSender {
         this.webhooks = { chat: null, staff: null };
 
         logger.debug('WebhookSender cleaned up');
-    }
-
-    /**
-     * Check if webhook is available for channel type
-     * @param {string} channelType - Channel type
-     * @returns {boolean} Whether webhook is available
-     */
-    hasWebhook(channelType) {
-        return !!this.webhooks[channelType];
-    }
-
-    /**
-     * Get webhook client for channel type
-     * @param {string} channelType - Channel type
-     * @returns {WebhookClient|null} Webhook client or null
-     */
-    getWebhook(channelType) {
-        return this.webhooks[channelType] || null;
     }
 }
 

@@ -1,9 +1,68 @@
-// Command Detection Handler - Detects slash-like commands from messages
+/**
+ * Command Detection Handler - Text-Based Command Detection and Execution
+ * 
+ * This file handles detection and execution of slash commands written as text messages
+ * in a designated Discord channel. It provides a bridge between text-based command input
+ * and the slash command execution system, enabling remote command execution from external
+ * platforms or authorized users who prefer text-based interaction.
+ * 
+ * The handler provides:
+ * - Text message monitoring in designated channel
+ * - Command syntax parsing from text format to slash command format
+ * - User whitelist security system for authorized access only
+ * - Pseudo-interaction creation to mimic Discord slash command interactions
+ * - Command registration from SlashCommandHandler
+ * - Guild command parsing with subcommand support
+ * - Visual feedback through message reactions (✅ success, ❌ error, ❓ unknown)
+ * - Error handling and user-friendly error messages
+ * 
+ * Security Features:
+ * - Channel-specific detection (only monitors configured channel)
+ * - User whitelist validation (only allowed users can execute)
+ * - Bot message filtering (prevents command loops)
+ * - Command prefix requirement (commands must start with '/')
+ * 
+ * Command Parsing:
+ * - Supports guild commands with subcommands (promote, demote, invite, kick, mute, unmute, setrank)
+ * - Parses command arguments into structured options
+ * - Validates required parameters for each command type
+ * - Provides helpful error messages for invalid syntax
+ * 
+ * Pseudo-Interaction System:
+ * - Creates interaction-like objects from text messages
+ * - Implements reply, editReply, followUp, deferReply methods
+ * - Handles options parsing (getString, getInteger, getBoolean, getSubcommand)
+ * - Maintains compatibility with existing slash command handlers
+ * 
+ * Example Usage:
+ * Text: "/guild promote FrenchLegacyIII Panda_Sauvage"
+ * Parsed: { commandName: "guild", options: { subcommand: "promote", guildname: "FrenchLegacyIII", username: "Panda_Sauvage" } }
+ * 
+ * @author Fabien83560
+ * @version 1.0.0
+ * @license ISC
+ */
+
+// Globals Imports
 const { Events } = require('discord.js');
+
+// Specific Imports
 const logger = require('../../../shared/logger');
 const BridgeLocator = require('../../../bridgeLocator.js');
 
+/**
+ * CommandDetectionHandler - Detects and executes text-based commands
+ * 
+ * Monitors a designated Discord channel for text messages that match command syntax,
+ * parses them into pseudo-interactions, and executes them through the slash command system.
+ * 
+ * @class
+ */
 class CommandDetectionHandler {
+    /**
+     * Create a new CommandDetectionHandler instance
+     * Initializes configuration and sets up command detection parameters
+     */
     constructor() {
         const mainBridge = BridgeLocator.getInstance();
         this.config = mainBridge.config;
@@ -15,8 +74,16 @@ class CommandDetectionHandler {
         this.commandPrefix = '/'; // Prefix for detected commands
     }
 
+    // ==================== INITIALIZATION ====================
+
     /**
      * Initialize the handler with Discord client
+     * 
+     * Sets up the handler with Discord client, loads configuration for
+     * detection channel and allowed users, and establishes message listener.
+     * 
+     * @async
+     * @param {Client} client - Discord client instance
      */
     async initialize(client) {
         this.client = client;
@@ -29,14 +96,26 @@ class CommandDetectionHandler {
 
     /**
      * Register available commands from slash command handler
+     * 
+     * Stores references to registered slash commands so they can be
+     * executed when detected in text messages.
+     * 
+     * @param {Map} slashCommands - Map of slash commands from SlashCommandHandler
      */
     registerCommands(slashCommands) {
         this.commands = new Map(slashCommands);
         logger.debug(`Registered ${this.commands.size} commands for detection`);
     }
 
+    // ==================== MESSAGE MONITORING ====================
+
     /**
      * Setup message listener for command detection
+     * 
+     * Registers event listener for Discord MessageCreate events.
+     * Processes messages through handleMessage with error handling.
+     * 
+     * @private
      */
     setupMessageListener() {
         this.client.on(Events.MessageCreate, async (message) => {
@@ -50,6 +129,16 @@ class CommandDetectionHandler {
 
     /**
      * Handle incoming messages and detect commands
+     * 
+     * Filters messages through multiple security checks:
+     * - Must be in configured detection channel
+     * - Must not be from the bot itself
+     * - Must be from an allowed user
+     * - Must start with command prefix
+     * 
+     * @async
+     * @private
+     * @param {Message} message - Discord message object
      */
     async handleMessage(message) {
         // Skip if not in detection channel
@@ -76,8 +165,18 @@ class CommandDetectionHandler {
         await this.processDetectedCommand(message);
     }
 
+    // ==================== COMMAND PROCESSING ====================
+
     /**
      * Process detected command from message
+     * 
+     * Parses the command text, validates command existence, creates a
+     * pseudo-interaction object, and executes the command through the
+     * slash command system. Provides visual feedback through reactions.
+     * 
+     * @async
+     * @private
+     * @param {Message} message - Discord message containing the command
      */
     async processDetectedCommand(message) {
         try {
@@ -127,11 +226,22 @@ class CommandDetectionHandler {
         }
     }
 
+    // ==================== COMMAND PARSING ====================
+
     /**
      * Parse command string into command name and options
-     * Example: "/guild promote FrenchLegacyIII Panda_Sauvage" 
-     * Returns: { commandName: "guild", options: { subcommand: "promote", guildname: "FrenchLegacyIII", username: "Panda_Sauvage" } }
-     * Or: { commandName: "guild", error: "Error message" } for parsing errors
+     * 
+     * Parses text command into structured format compatible with slash commands.
+     * Handles different command structures and validates parameter counts.
+     * 
+     * Examples:
+     * - "/guild promote FrenchLegacyIII Panda_Sauvage" 
+     *   → { commandName: "guild", options: { subcommand: "promote", guildname: "FrenchLegacyIII", username: "Panda_Sauvage" } }
+     * - "/ping"
+     *   → { commandName: "ping", options: {} }
+     * 
+     * @param {string} content - Message content to parse
+     * @returns {object|null} Parsed command with commandName and options, or object with error property
      */
     parseCommand(content) {
         const parts = content.trim().split(/\s+/);
@@ -165,6 +275,20 @@ class CommandDetectionHandler {
 
     /**
      * Parse guild-specific commands
+     * 
+     * Handles complex guild command syntax with subcommands and variable parameters.
+     * Validates required parameters for each subcommand type and provides helpful
+     * error messages for invalid syntax.
+     * 
+     * Supported subcommands:
+     * - promote/demote/invite/kick: /guild <action> <guildname> <username> [rank]
+     * - mute/unmute: /guild <action> <guildname> <scope> [username] [time]
+     * - setrank: /guild setrank <guildname> <username> <rank>
+     * 
+     * @private
+     * @param {string} commandName - Command name ("guild")
+     * @param {Array<string>} args - Command arguments
+     * @returns {object} Parsed command object or error object
      */
     parseGuildCommand(commandName, args) {
         if (args.length < 2) {
@@ -240,6 +364,13 @@ class CommandDetectionHandler {
 
     /**
      * Parse generic commands (fallback)
+     * 
+     * Provides simple key-value parsing for commands that don't have
+     * specialized parsers. Treats arguments as alternating keys and values.
+     * 
+     * @private
+     * @param {Array<string>} args - Command arguments
+     * @returns {object} Parsed options object
      */
     parseGenericCommand(args) {
         const options = {};
@@ -254,8 +385,26 @@ class CommandDetectionHandler {
         return options;
     }
 
+    // ==================== PSEUDO-INTERACTION SYSTEM ====================
+
     /**
      * Create pseudo-interaction object that mimics Discord.js ChatInputCommandInteraction
+     * 
+     * Creates an object that mimics the Discord.js interaction API, allowing text-based
+     * commands to be executed through the same handlers as slash commands. Implements
+     * all necessary interaction methods and properties for compatibility.
+     * 
+     * The pseudo-interaction includes:
+     * - Basic properties (commandName, user, member, channel, guild, timestamps)
+     * - State tracking (replied, deferred, ephemeral)
+     * - Options getters (getString, getInteger, getBoolean, getSubcommand)
+     * - Response methods (reply, editReply, followUp, deferReply, fetchReply)
+     * 
+     * @private
+     * @param {Message} message - Original Discord message
+     * @param {string} commandName - Parsed command name
+     * @param {object} options - Parsed command options
+     * @returns {object} Pseudo-interaction object compatible with slash command handlers
      */
     createPseudoInteraction(message, commandName, options) {
         // Ensure options is never undefined
@@ -279,6 +428,11 @@ class CommandDetectionHandler {
             
             // Options handling with null safety - return empty string instead of null
             options: {
+                /**
+                 * Get string option value
+                 * @param {string} name - Option name
+                 * @returns {string} Option value or empty string
+                 */
                 getString: (name) => {
                     // Extra safety check
                     if (!options || typeof options !== 'object') return '';
@@ -287,6 +441,12 @@ class CommandDetectionHandler {
                     if (value === null || value === undefined) return '';
                     return String(value);
                 },
+                
+                /**
+                 * Get integer option value
+                 * @param {string} name - Option name
+                 * @returns {number|null} Parsed integer or null
+                 */
                 getInteger: (name) => {
                     if (!options || typeof options !== 'object') return null;
                     const value = options[name];
@@ -294,6 +454,12 @@ class CommandDetectionHandler {
                     const parsed = parseInt(value);
                     return isNaN(parsed) ? null : parsed;
                 },
+                
+                /**
+                 * Get boolean option value
+                 * @param {string} name - Option name
+                 * @returns {boolean|null} Boolean value or null
+                 */
                 getBoolean: (name) => {
                     if (!options || typeof options !== 'object') return null;
                     const value = options[name];
@@ -302,6 +468,11 @@ class CommandDetectionHandler {
                     if (value === 'false' || value === false) return false;
                     return null;
                 },
+                
+                /**
+                 * Get subcommand name
+                 * @returns {string} Subcommand name or empty string
+                 */
                 getSubcommand: () => {
                     if (!options || typeof options !== 'object') return '';
                     return options.subcommand || '';
@@ -309,6 +480,12 @@ class CommandDetectionHandler {
             },
             
             // Response methods
+            
+            /**
+             * Reply to the command
+             * @param {string|object} responseData - Response content or object
+             * @returns {Promise<Message>} Sent message
+             */
             reply: async (responseData) => {
                 pseudoInteraction.replied = true;
                 
@@ -326,6 +503,11 @@ class CommandDetectionHandler {
                 return pseudoInteraction.lastReply;
             },
             
+            /**
+             * Edit the reply
+             * @param {string|object} responseData - New content
+             * @returns {Promise<Message>} Edited message
+             */
             editReply: async (responseData) => {
                 if (!pseudoInteraction.lastReply) {
                     throw new Error('No reply to edit');
@@ -342,6 +524,11 @@ class CommandDetectionHandler {
                 });
             },
             
+            /**
+             * Send a follow-up message
+             * @param {string|object} responseData - Follow-up content
+             * @returns {Promise<Message>} Sent message
+             */
             followUp: async (responseData) => {
                 const followUpContent = typeof responseData === 'string' ? 
                     responseData : responseData.content;
@@ -354,6 +541,11 @@ class CommandDetectionHandler {
                 });
             },
             
+            /**
+             * Defer the reply (show "thinking" state)
+             * @param {object} options - Defer options
+             * @returns {Promise<Message>} Temporary message
+             */
             deferReply: async (options = {}) => {
                 pseudoInteraction.deferred = true;
                 pseudoInteraction.ephemeral = options.ephemeral || false;
@@ -365,6 +557,10 @@ class CommandDetectionHandler {
                 });
             },
             
+            /**
+             * Fetch the reply message
+             * @returns {Promise<Message>} Reply message
+             */
             fetchReply: async () => {
                 return pseudoInteraction.lastReply;
             }
@@ -373,8 +569,14 @@ class CommandDetectionHandler {
         return pseudoInteraction;
     }
 
+    // ==================== USER MANAGEMENT ====================
+
     /**
      * Set allowed users for security
+     * 
+     * Replaces the entire whitelist of users allowed to execute commands.
+     * 
+     * @param {Array<string>} userIds - Array of Discord user IDs
      */
     setAllowedUsers(userIds) {
         this.allowedUserIds = userIds;
@@ -383,6 +585,10 @@ class CommandDetectionHandler {
 
     /**
      * Add a single allowed user
+     * 
+     * Adds a user to the whitelist if not already present.
+     * 
+     * @param {string} userId - Discord user ID to add
      */
     addAllowedUser(userId) {
         if (!this.allowedUserIds.includes(userId)) {
@@ -392,7 +598,11 @@ class CommandDetectionHandler {
     }
 
     /**
-     * Remove an allowed bot
+     * Remove an allowed user
+     * 
+     * Removes a user from the whitelist.
+     * 
+     * @param {string} userId - Discord user ID to remove
      */
     removeAllowedUser(userId) {
         this.allowedUserIds = this.allowedUserIds.filter(id => id !== userId);
