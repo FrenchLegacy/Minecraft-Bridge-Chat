@@ -25,6 +25,8 @@ jobs:
           COMMIT_MSG="${{ github.event.head_commit.message }}"
           COMMIT_URL="${{ github.event.head_commit.url }}"
           AVATAR_URL="https://github.com/${AUTHOR}.png"
+
+          export TZ="Europe/Paris"
           TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
 
           CHANGED_FILES=$(git diff --stat HEAD~1 HEAD | tail -1 | awk '{print $1}')
@@ -73,6 +75,6 @@ jobs:
             }')
 
           curl -H "Content-Type: application/json" \
-               -X POST \
-               -d "$JSON_PAYLOAD" \
-               $DISCORD_WEBHOOK
+              -X POST \
+              -d "$JSON_PAYLOAD" \
+              $DISCORD_WEBHOOK
