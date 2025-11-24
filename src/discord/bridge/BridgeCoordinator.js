@@ -311,6 +311,8 @@ class BridgeCoordinator {
             const result = await this.discordManager.sendGuildEvent(eventData, guildConfig);
             logger.debug(`[MC→DC] Discord event send result: ${JSON.stringify(result)}`);
 
+            await this.sendDetectionNotification(eventData, guildConfig);
+
             // DOUBLE-LOGGING FIX: Check if there's an active Discord command listener for this event
             logger.debug(`[MC→DC] ================================`);
             logger.debug(`[MC→DC] DOUBLE-LOGGING CHECK START`);
@@ -528,6 +530,81 @@ class BridgeCoordinator {
         } catch (error) {
             logger.logError(error, `Unexpected error bridging Discord message to Minecraft`);
             await this.handleBridgeError(messageData, error, successCount, connectedGuilds.length);
+        }
+    }
+
+    /**
+     * Send detection notification to detection channel
+     * 
+     * Sends a notification to the configured detection channel for join, leave,
+     * promote, and demote events. The message includes:
+     * - Join/Leave: player username and guild name
+     * - Promote/Demote: player username and new rank
+     * 
+     * @async
+     * @param {object} eventData - Event data from Minecraft
+     * @param {string} eventData.type - Event type (join, leave, promote, demote)
+     * @param {string} eventData.username - Player username
+     * @param {string} [eventData.toRank] - New rank (for promote/demote)
+     * @param {object} guildConfig - Guild configuration
+     * @param {string} guildConfig.name - Guild name
+     */
+    async sendDetectionNotification(eventData, guildConfig) {
+        try {
+            // Only send notifications for specific event types
+            const notifiableEvents = ['join', 'leave', 'promote', 'demote'];
+            if (!notifiableEvents.includes(eventData.type)) {
+                return;
+            }
+
+            // Get detection channel ID from config
+            const detectionChannelId = this.config.get('features.detection.channelId');
+            if (!detectionChannelId) {
+                logger.warn('[DETECTION] Detection channel not configured, skipping notification');
+                return;
+            }
+
+            // Get Discord client
+            const discordManager = BridgeLocator.getInstance().getDiscordManager();
+            if (!discordManager || !discordManager.getClient()) {
+                logger.warn('[DETECTION] Discord manager not available, skipping detection notification');
+                return;
+            }
+
+            // Fetch detection channel
+            const detectionChannel = await discordManager.getClient().channels.fetch(detectionChannelId);
+            if (!detectionChannel) {
+                logger.warn(`[DETECTION] Detection channel not found: ${detectionChannelId}`);
+                return;
+            }
+
+            // Build notification message based on event type
+            let notificationMessage = '';
+            
+            switch (eventData.type) {
+                case 'join':
+                    notificationMessage = `[GUILD JOIN] ${eventData.username} joined ${guildConfig.name}`;
+                    break;
+                    
+                case 'leave':
+                    notificationMessage = `[GUILD LEAVE] ${eventData.username} left ${guildConfig.name}`;
+                    break;
+                    
+                case 'promote':
+                    notificationMessage = `[GUILD PROMOTE] ${eventData.username} was promoted to ${eventData.toRank || 'Unknown Rank'} in ${guildConfig.name}`;
+                    break;
+                    
+                case 'demote':
+                    notificationMessage = `[GUILD DEMOTE] ${eventData.username} was demoted to ${eventData.toRank || 'Unknown Rank'} in ${guildConfig.name}`;
+                    break;
+            }
+
+            // Send notification to detection channel
+            await detectionChannel.send(notificationMessage);
+            logger.debug(`[DETECTION] Sent ${eventData.type} notification for ${eventData.username} in ${guildConfig.name}`);
+
+        } catch (error) {
+            logger.logError(error, `Failed to send detection notification for ${eventData.type} event`);
         }
     }
 
