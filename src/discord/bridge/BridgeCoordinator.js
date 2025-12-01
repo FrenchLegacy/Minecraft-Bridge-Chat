@@ -144,7 +144,6 @@ class BridgeCoordinator {
 
         // Handle Minecraft messages
         this.minecraftManager.onMessage((messageData) => {
-            logger.debug(`[BRIDGE] Received Minecraft message event: ${JSON.stringify(messageData)}`);
             this.handleMinecraftMessage(messageData);
         });
 
@@ -190,7 +189,6 @@ class BridgeCoordinator {
 
         // Handle Discord messages
         this.discordManager.onMessage((messageData) => {
-            logger.debug(`[BRIDGE] Received Discord message event: ${JSON.stringify(messageData)}`);
             this.handleDiscordMessage(messageData);
         });
 
@@ -309,7 +307,6 @@ class BridgeCoordinator {
             // Send to Discord chat (existing functionality)
             logger.debug(`[MC→DC] Sending event to Discord chat...`);
             const result = await this.discordManager.sendGuildEvent(eventData, guildConfig);
-            logger.debug(`[MC→DC] Discord event send result: ${JSON.stringify(result)}`);
 
             await this.sendDetectionNotification(eventData, guildConfig);
 
@@ -552,7 +549,7 @@ class BridgeCoordinator {
     async sendDetectionNotification(eventData, guildConfig) {
         try {
             // Only send notifications for specific event types
-            const notifiableEvents = ['join', 'leave', 'promote', 'demote'];
+            const notifiableEvents = ['welcome', 'leave', 'promote', 'demote'];
             if (!notifiableEvents.includes(eventData.type)) {
                 return;
             }
@@ -582,7 +579,7 @@ class BridgeCoordinator {
             let notificationMessage = '';
             
             switch (eventData.type) {
-                case 'join':
+                case 'welcome':
                     notificationMessage = `[GUILD JOIN] ${eventData.username} joined ${guildConfig.name}`;
                     break;
                     
