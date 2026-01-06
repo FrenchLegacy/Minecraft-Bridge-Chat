@@ -1093,6 +1093,47 @@
                 "description": "You do not have permission to mute"
               }
             ]
+          },
+          "unmute": {
+            "success": [
+              {
+                "pattern": "\\[.+?\\] ([\\w_]+) has unmuted \\[.+?\\] ([\\w_]+)",
+                "groups": ["usernameUnMuter", "usernameunMuted"],
+                "description": "Player unmuted successfully"
+              },
+              {
+                "pattern": "\\[.+?\\] ([\\w_]+) has unmuted the guild chat!",
+                "groups": ["usernameUnMuter"],
+                "description": "Guild unmuted successfully"
+              }
+            ],
+            "error": [
+              {
+                "pattern": "Invalid usage! '/guild unmute <player/everyone>'",
+                "groups": [],
+                "description": "Invalid command usage"
+              },
+              {
+                "pattern": "This player is not muted!",
+                "groups": [],
+                "description": "Player not muted"
+              },
+              {
+                "pattern": "\\[.+?\\] ([\\w_]+) is not in your guild!",
+                "groups": ["username"],
+                "description": "Player not in your guild"
+              },
+              {
+                "pattern": "Can't find a player by the name of '([\\w_]+)'",
+                "groups": ["username"],
+                "description": "Can't find this player name"
+              },
+              {
+                "pattern": "You do not have permission to use this command!",
+                "groups": [],
+                "description": "You do not have permission to mute"
+              }
+            ]
           }
         },
         "online": {
@@ -1180,48 +1221,7 @@
               "groups": [],
               "description": "Not in a guild"
             }
-          ],
-          "unmute": {
-            "success": [
-              {
-                "pattern": "\\[.+?\\] ([\\w_]+) has unmuted \\[.+?\\] ([\\w_]+)",
-                "groups": ["usernameUnMuter", "usernameunMuted"],
-                "description": "Player unmuted successfully"
-              },
-              {
-                "pattern": "\\[.+?\\] ([\\w_]+) has unmuted the guild chat!",
-                "groups": ["usernameUnMuter"],
-                "description": "Guild unmuted successfully"
-              }
-            ],
-            "error": [
-              {
-                "pattern": "Invalid usage! '/guild unmute <player/everyone>'",
-                "groups": [],
-                "description": "Invalid command usage"
-              },
-              {
-                "pattern": "This player is not muted!",
-                "groups": [],
-                "description": "Player not muted"
-              },
-              {
-                "pattern": "\\[.+?\\] ([\\w_]+) is not in your guild!",
-                "groups": ["username"],
-                "description": "Player not in your guild"
-              },
-              {
-                "pattern": "Can't find a player by the name of '([\\w_]+)'",
-                "groups": ["username"],
-                "description": "Can't find this player name"
-              },
-              {
-                "pattern": "You do not have permission to use this command!",
-                "groups": [],
-                "description": "You do not have permission to mute"
-              }
-            ]
-          }
+          ]
         }
       }
     }
