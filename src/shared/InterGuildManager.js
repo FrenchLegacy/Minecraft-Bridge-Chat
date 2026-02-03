@@ -644,8 +644,6 @@ class InterGuildManager {
                 this.messageHistory.delete(guildId);
             }
         }
-
-        logger.debug(`Anti-loop cleanup: ${this.messageHashes.size} hashes, ${this.messageHistory.size} guild histories`);
     }
 
     /**

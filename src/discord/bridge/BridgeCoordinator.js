@@ -149,7 +149,6 @@ class BridgeCoordinator {
 
         // Handle Minecraft events
         this.minecraftManager.onEvent((eventData) => {
-            logger.debug(`[BRIDGE] Received Minecraft event: ${JSON.stringify(eventData)}`);
             this.handleMinecraftEvent(eventData);
         });
 
