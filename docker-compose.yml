@@ -13,6 +13,8 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
+    labels:
+      - "user.frenchlegacy=allowed"
 
 volumes:
   bridge_data:
