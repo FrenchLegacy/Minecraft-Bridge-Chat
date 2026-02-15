@@ -16,63 +16,63 @@
         },
         "events": {
           "join": {
-            "basic": "{username} joined the guild!",
-            "withTag": "{username} {tag} joined the guild!",
-            "withSourceTag": "[{sourceGuildTag}] {username} joined the guild!",
-            "withBothTags": "[{sourceGuildTag}] {username} {tag} joined the guild!"
+            "basic": "{username} a rejoint la guilde !",
+            "withTag": "{username} {tag} a rejoint la guilde !",
+            "withSourceTag": "[{sourceGuildTag}] {username} a rejoint la guilde !",
+            "withBothTags": "[{sourceGuildTag}] {username} {tag} a rejoint la guilde !"
           },
           "leave": {
-            "basic": "{username} left the guild",
-            "withTag": "{username} {tag} left the guild",
-            "withSourceTag": "{username} left the guild",
-            "withBothTags": "{username} {tag} left the guild"
+            "basic": "{username} a quitté la guilde",
+            "withTag": "{username} {tag} a quitté la guilde",
+            "withSourceTag": "{username} a quitté la guilde",
+            "withBothTags": "{username} {tag} a quitté la guilde"
           },
           "welcome": {
-            "basic": "Welcome to {username}",
-            "withTag": "Welcome to {username} in the guild !",
-            "withSourceTag": "Welcome to {username} in the guild !",
-            "withBothTags": "Welcome to {username} in the guild !"
+            "basic": "Bienvenue à {username}",
+            "withTag": "Bienvenue à {username} dans la guilde !",
+            "withSourceTag": "Bienvenue à {username} dans la guilde !",
+            "withBothTags": "Bienvenue à {username} dans la guilde !"
           },
           "kick": {
-            "basic": "{username} was kicked from the guild",
-            "withTag": "{username} {tag} was kicked from the guild",
-            "withSourceTag": "[{sourceGuildTag}] {username} was kicked from the guild",
-            "withBothTags": "[{sourceGuildTag}] {username} {tag} was kicked from the guild"
+            "basic": "{username} a été expulsé de la guilde",
+            "withTag": "{username} {tag} a été expulsé de la guilde",
+            "withSourceTag": "[{sourceGuildTag}] {username} a été expulsé de la guilde",
+            "withBothTags": "[{sourceGuildTag}] {username} {tag} a été expulsé de la guilde"
           },
           "promote": {
-            "basic": "{username} was promoted to {toRank}",
-            "withTag": "{username} {tag} was promoted to {toRank}",
-            "withSourceTag": "[{sourceGuildTag}] {username} was promoted to {toRank}",
-            "withBothTags": "[{sourceGuildTag}] {username} {tag} was promoted to {toRank}"
+            "basic": "{username} a été promu au rang {toRank}",
+            "withTag": "{username} {tag} a été promu au rang {toRank}",
+            "withSourceTag": "[{sourceGuildTag}] {username} a été promu au rang {toRank}",
+            "withBothTags": "[{sourceGuildTag}] {username} {tag} a été promu au rang {toRank}"
           },
           "demote": {
-            "basic": "{username} was demoted to {toRank}",
-            "withTag": "{username} {tag} was demoted to {toRank}",
-            "withSourceTag": "[{sourceGuildTag}] {username} was demoted to {toRank}",
-            "withBothTags": "[{sourceGuildTag}] {username} {tag} was demoted to {toRank}"
+            "basic": "{username} a été rétrogradé au rang {toRank}",
+            "withTag": "{username} {tag} a été rétrogradé au rang {toRank}",
+            "withSourceTag": "[{sourceGuildTag}] {username} a été rétrogradé au rang {toRank}",
+            "withBothTags": "[{sourceGuildTag}] {username} {tag} a été rétrogradé au rang {toRank}"
           },
           "level": {
-            "basic": "Guild reached level {level}!",
-            "withTag": "Guild reached level {level}!",
-            "withSourceTag": "[{sourceGuildTag}] Guild reached level {level}!",
-            "withBothTags": "[{sourceGuildTag}] Guild reached level {level}!"
+            "basic": "La guilde a atteint le niveau {level} !",
+            "withTag": "La guilde a atteint le niveau {level} !",
+            "withSourceTag": "[{sourceGuildTag}] La guilde a atteint le niveau {level} !",
+            "withBothTags": "[{sourceGuildTag}] La guilde a atteint le niveau {level} !"
           },
           "motd": {
-            "basic": "{changer} changed the guild MOTD to: {motd}",
-            "withTag": "{changer} {tag} changed the guild MOTD to: {motd}",
-            "withSourceTag": "[{sourceGuildTag}] {changer} changed the guild MOTD to: {motd}",
-            "withBothTags": "[{sourceGuildTag}] {changer} {tag} changed the guild MOTD to: {motd}"
+            "basic": "{changer} a modifié le MOTD de la guilde en : {motd}",
+            "withTag": "{changer} {tag} a modifié le MOTD de la guilde en : {motd}",
+            "withSourceTag": "[{sourceGuildTag}] {changer} a modifié le MOTD de la guilde en : {motd}",
+            "withBothTags": "[{sourceGuildTag}] {changer} {tag} a modifié le MOTD de la guilde en : {motd}"
           }
         },
         "system": {
           "connection": {
-            "connected": "[SYSTEM] {guildName} bot connected",
-            "disconnected": "[SYSTEM] {guildName} bot disconnected{reason}",
-            "reconnected": "[SYSTEM] {guildName} bot reconnected"
+            "connected": "[SYSTEM] Bot {guildName} connecté",
+            "disconnected": "[SYSTEM] Bot {guildName} déconnecté{reason}",
+            "reconnected": "[SYSTEM] Bot {guildName} reconnecté"
           },
           "error": {
-            "basic": "[ERROR] {error}",
-            "withContext": "[ERROR] {context}: {error}"
+            "basic": "[ERREUR] {error}",
+            "withContext": "[ERREUR] {context} : {error}"
           }
         }
       }
@@ -85,10 +85,10 @@
           "withSourceTag": "{message}",
           "withBothTags": "{message}",
           "embed": {
-            "title": "Guild Chat - {guildName}",
-            "description": "**{username}**: {message}",
+            "title": "Chat Guilde - {guildName}",
+            "description": "**{username}** : {message}",
             "color": 3447003,
-            "footer": "From {guildName}"
+            "footer": "Depuis {guildName}"
           }
         },
         "officer": {
@@ -97,65 +97,65 @@
           "withSourceTag": "{message}",
           "withBothTags": "{message}",
           "embed": {
-            "title": "🛡️ Officer Chat - {guildName}",
-            "description": "**{username}**: {message}",
+            "title": "🛡️ Chat Officier - {guildName}",
+            "description": "**{username}** : {message}",
             "color": 15844367,
-            "footer": "From {guildName}"
+            "footer": "Depuis {guildName}"
           }
         },
         "events": {
           "join": {
-            "basic": "**{username} joined the guild!** 👋",
-            "withTag": "**{username}** `{tag}` **joined the guild!** 👋",
-            "withSourceTag": "**[{sourceGuildTag}]** **{username} joined the guild!** 👋",
-            "withBothTags": "**[{sourceGuildTag}]** **{username}** `{tag}` **joined the guild!** 👋"
+            "basic": "**{username} a rejoint la guilde !** 👋",
+            "withTag": "**{username}** `{tag}` **a rejoint la guilde !** 👋",
+            "withSourceTag": "**[{sourceGuildTag}]** **{username} a rejoint la guilde !** 👋",
+            "withBothTags": "**[{sourceGuildTag}]** **{username}** `{tag}` **a rejoint la guilde !** 👋"
           },
           "leave": {
-            "basic": "**{username} left the guild** 👋",
-            "withTag": "**{username}** `{tag}` **left the guild** 👋",
-            "withSourceTag": "**[{sourceGuildTag}]** **{username} left the guild** 👋",
-            "withBothTags": "**[{sourceGuildTag}]** **{username}** `{tag}` **left the guild** 👋"
+            "basic": "**{username} a quitté la guilde** 👋",
+            "withTag": "**{username}** `{tag}` **a quitté la guilde** 👋",
+            "withSourceTag": "**[{sourceGuildTag}]** **{username} a quitté la guilde** 👋",
+            "withBothTags": "**[{sourceGuildTag}]** **{username}** `{tag}` **a quitté la guilde** 👋"
           },
           "kick": {
-            "basic": "**{username} was kicked** 🚫",
-            "withTag": "**{username}** `{tag}` **was kicked** 🚫",
-            "withSourceTag": "**[{sourceGuildTag}]** **{username} was kicked** 🚫",
-            "withBothTags": "**[{sourceGuildTag}]** **{username}** `{tag}` **was kicked** 🚫"
+            "basic": "**{username} a été expulsé** 🚫",
+            "withTag": "**{username}** `{tag}` **a été expulsé** 🚫",
+            "withSourceTag": "**[{sourceGuildTag}]** **{username} a été expulsé** 🚫",
+            "withBothTags": "**[{sourceGuildTag}]** **{username}** `{tag}` **a été expulsé** 🚫"
           },
           "promote": {
-            "basic": "**{username} was promoted to {toRank}** ⬆️",
-            "withTag": "**{username}** `{tag}` **was promoted to {toRank}** ⬆️",
-            "withSourceTag": "**[{sourceGuildTag}]** **{username} was promoted to {toRank}** ⬆️",
-            "withBothTags": "**[{sourceGuildTag}]** **{username}** `{tag}` **was promoted to {toRank}** ⬆️"
+            "basic": "**{username} a été promu au rang {toRank}** ⬆️",
+            "withTag": "**{username}** `{tag}` **a été promu au rang {toRank}** ⬆️",
+            "withSourceTag": "**[{sourceGuildTag}]** **{username} a été promu au rang {toRank}** ⬆️",
+            "withBothTags": "**[{sourceGuildTag}]** **{username}** `{tag}` **a été promu au rang {toRank}** ⬆️"
           },
           "demote": {
-            "basic": "**{username} was demoted to {toRank}** ⬇️",
-            "withTag": "**{username}** `{tag}` **was demoted to {toRank}** ⬇️",
-            "withSourceTag": "**[{sourceGuildTag}]** **{username} was demoted to {toRank}** ⬇️",
-            "withBothTags": "**[{sourceGuildTag}]** **{username}** `{tag}` **was demoted to {toRank}** ⬇️"
+            "basic": "**{username} a été rétrogradé au rang {toRank}** ⬇️",
+            "withTag": "**{username}** `{tag}` **a été rétrogradé au rang {toRank}** ⬇️",
+            "withSourceTag": "**[{sourceGuildTag}]** **{username} a été rétrogradé au rang {toRank}** ⬇️",
+            "withBothTags": "**[{sourceGuildTag}]** **{username}** `{tag}` **a été rétrogradé au rang {toRank}** ⬇️"
           },
           "level": {
-            "basic": "**Guild reached level {level}!** 🎉",
-            "withTag": "**Guild reached level {level}!** 🎉",
-            "withSourceTag": "**[{sourceGuildTag}]** **Guild reached level {level}!** 🎉",
-            "withBothTags": "**[{sourceGuildTag}]** **Guild reached level {level}!** 🎉"
+            "basic": "**La guilde a atteint le niveau {level} !** 🎉",
+            "withTag": "**La guilde a atteint le niveau {level} !** 🎉",
+            "withSourceTag": "**[{sourceGuildTag}]** **La guilde a atteint le niveau {level} !** 🎉",
+            "withBothTags": "**[{sourceGuildTag}]** **La guilde a atteint le niveau {level} !** 🎉"
           },
           "motd": {
-            "basic": "**{changer} changed the guild MOTD to:** {motd}",
-            "withTag": "**{changer}** `{tag}` **changed the guild MOTD to:** {motd}",
-            "withSourceTag": "**[{sourceGuildTag}]** **{changer} changed the guild MOTD to:** {motd}",
-            "withBothTags": "**[{sourceGuildTag}]** **{changer}** `{tag}` **changed the guild MOTD to:** {motd}"
+            "basic": "**{changer} a modifié le MOTD de la guilde en :** {motd}",
+            "withTag": "**{changer}** `{tag}` **a modifié le MOTD de la guilde en :** {motd}",
+            "withSourceTag": "**[{sourceGuildTag}]** **{changer} a modifié le MOTD de la guilde en :** {motd}",
+            "withBothTags": "**[{sourceGuildTag}]** **{changer}** `{tag}` **a modifié le MOTD de la guilde en :** {motd}"
           }
         },
         "system": {
           "connection": {
-            "connected": "✅ **{guildName}** bot connected",
-            "disconnected": "🔴 **{guildName}** bot disconnected{reason}",
-            "reconnected": "🔄 **{guildName}** bot reconnected"
+            "connected": "✅ **Bot {guildName} connecté**",
+            "disconnected": "🔴 **Bot {guildName} déconnecté**{reason}",
+            "reconnected": "🔄 **Bot {guildName} reconnecté**"
           },
           "error": {
-            "basic": "❌ **Error:** {error}",
-            "withContext": "❌ **Error in {context}:** {error}"
+            "basic": "❌ **Erreur :** {error}",
+            "withContext": "❌ **Erreur dans {context} :** {error}"
           }
         }
       }
@@ -163,16 +163,16 @@
   },
   "defaults": {
     "placeholders": {
-      "username": "Player",
-      "message": "Hello!",
+      "username": "Joueur",
+      "message": "Bonjour !",
       "tag": "TAG",
       "sourceGuildTag": "SRC",
-      "guildName": "Guild",
-      "toRank": "Member",
-      "fromRank": "Guest",
+      "guildName": "Guilde",
+      "toRank": "Membre",
+      "fromRank": "Invité",
       "level": "1",
-      "changer": "Player",
-      "motd": "Welcome to our guild!",
+      "changer": "Joueur",
+      "motd": "Bienvenue dans notre guilde !",
       "reason": ""
     },
     "colors": {
@@ -210,13 +210,13 @@
   "metadata": {
     "version": "1.0.0",
     "lastUpdated": "2025-01-15",
-    "description": "Message templates for inter-guild and Discord communication",
+    "description": "Modèles de messages pour la communication inter-guildes et Discord",
     "author": "Minecraft-Bridge-Chat",
     "supportedPlatforms": ["minecraft", "discord"],
     "templateFormat": {
-      "placeholders": "Variables surrounded by curly braces {variable}",
-      "conditionalContent": "Optional content based on configuration",
-      "formatting": "Platform-specific formatting (Minecraft vs Discord)"
+      "placeholders": "Variables entourées d'accolades {variable}",
+      "conditionalContent": "Contenu optionnel selon la configuration",
+      "formatting": "Formatage spécifique à la plateforme (Minecraft vs Discord)"
     }
   }
 }
