@@ -121,11 +121,19 @@ class MessageCoordinator {
      * // Returns: { category: 'event', data: { type: 'join', ... } }
      */
     processMessage(rawMessage, guildConfig) {
-        const messageText = typeof rawMessage === 'string' ? rawMessage : rawMessage.toString();
-        
+        let messageText = typeof rawMessage === 'string' ? rawMessage : rawMessage.toString();
+
+        // Strip Hypixel automatic Discord link warning appended to player messages
+        const hypixelWarning = 'Please be mindful of Discord links in chat as they may pose a security risk';
+        if (messageText.includes(hypixelWarning)) {
+            logger.debug(`[GUILD] [${guildConfig.name}] Stripping Hypixel Discord link warning from message`);
+            messageText = messageText.replace(hypixelWarning, '').trim();
+            rawMessage = messageText;
+        }
+
         // Log with [GUILD] prefix since this message was already filtered by strategy
         logger.bridge(`[GUILD] [${guildConfig.name}] Coordinator processing guild message: "${messageText.substring(0, 100)}${messageText.length > 100 ? '...' : ''}"`);
-        
+
         // Try to parse as guild event first (events are more specific)
         const eventData = this.eventParser.parseEvent(rawMessage, guildConfig);
         if (eventData && eventData.parsedSuccessfully) {
