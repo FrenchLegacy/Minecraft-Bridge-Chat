@@ -120,14 +120,20 @@ class MessageCoordinator {
      * );
      * // Returns: { category: 'event', data: { type: 'join', ... } }
      */
-    processMessage(rawMessage, guildConfig) {
-        let messageText = typeof rawMessage === 'string' ? rawMessage : rawMessage.toString();
-
-        // Strip Hypixel automatic Discord link warning appended to player messages
+    stripHypixelWarning(rawMessage) {
+        const messageText = typeof rawMessage === 'string' ? rawMessage : rawMessage.toString();
         const hypixelWarning = 'Please be mindful of Discord links in chat as they may pose a security risk';
         if (messageText.includes(hypixelWarning)) {
+            return messageText.replace(hypixelWarning, '').trim();
+        }
+        return messageText;
+    }
+
+    processMessage(rawMessage, guildConfig) {
+        let messageText = this.stripHypixelWarning(rawMessage);
+
+        if (messageText !== (typeof rawMessage === 'string' ? rawMessage : rawMessage.toString())) {
             logger.debug(`[GUILD] [${guildConfig.name}] Stripping Hypixel Discord link warning from message`);
-            messageText = messageText.replace(hypixelWarning, '').trim();
             rawMessage = messageText;
         }
 
@@ -436,7 +442,8 @@ class MessageCoordinator {
      */
     processGuildChatMessage(rawMessage, guildConfig) {
         logger.bridge(`[GUILD] [${guildConfig.name}] Processing specifically as guild chat message`);
-        
+
+        rawMessage = this.stripHypixelWarning(rawMessage);
         const chatData = this.chatParser.parseMessage(rawMessage, guildConfig);
         
         if (chatData.type === 'guild_chat') {
@@ -476,7 +483,8 @@ class MessageCoordinator {
      */
     processOfficerChatMessage(rawMessage, guildConfig) {
         logger.bridge(`[OFFICER] [${guildConfig.name}] Processing specifically as officer chat message`);
-        
+
+        rawMessage = this.stripHypixelWarning(rawMessage);
         const chatData = this.chatParser.parseMessage(rawMessage, guildConfig);
         
         if (chatData.type === 'guild_chat' && chatData.chatType === 'officer') {
@@ -518,7 +526,8 @@ class MessageCoordinator {
      */
     processGuildEvent(rawMessage, guildConfig) {
         logger.bridge(`[GUILD] [${guildConfig.name}] Processing specifically as guild event`);
-        
+
+        rawMessage = this.stripHypixelWarning(rawMessage);
         const eventData = this.eventParser.parseEvent(rawMessage, guildConfig);
         
         if (eventData && eventData.parsedSuccessfully) {
@@ -544,6 +553,7 @@ class MessageCoordinator {
      * }
      */
     isOfficerChatMessage(rawMessage, guildConfig) {
+        rawMessage = this.stripHypixelWarning(rawMessage);
         const chatData = this.chatParser.parseMessage(rawMessage, guildConfig);
         return chatData.type === 'guild_chat' && chatData.chatType === 'officer';
     }
@@ -564,6 +574,7 @@ class MessageCoordinator {
      * }
      */
     isGuildChatMessage(rawMessage, guildConfig) {
+        rawMessage = this.stripHypixelWarning(rawMessage);
         const chatData = this.chatParser.parseMessage(rawMessage, guildConfig);
         return chatData.type === 'guild_chat';
     }
