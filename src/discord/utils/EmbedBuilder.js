@@ -76,15 +76,16 @@ class EmbedBuilder {
         this.config = mainBridge.config;
         this.templateLoader = getTemplateLoader();
 
-        // Default colors from templates
-        this.colors = this.templateLoader.getDefaults('colors') || {
+        // Default colors from templates (merge so missing keys use hardcoded defaults)
+        this.colors = {
             guild: 3447003,      // Blue
             officer: 15844367,   // Orange
             event: 3066993,      // Green
             system: 9807270,     // Gray
             error: 15158332,     // Red
             success: 3066993,    // Green
-            warning: 15844367    // Orange
+            warning: 15844367,   // Orange
+            ...this.templateLoader.getDefaults('colors')
         };
 
         // Default emojis from templates

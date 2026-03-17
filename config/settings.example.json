@@ -154,7 +154,8 @@
             "kick": "KICK_LOG_CHANNEL_ID",
             "promote": "PROMOTE_LOG_CHANNEL_ID",
             "demote": "DEMOTE_LOG_CHANNEL_ID",
-            "setrank": "SETRANK_LOG_CHANNEL_ID"
+            "setrank": "SETRANK_LOG_CHANNEL_ID",
+            "botStatus": "BOTSTATUS_LOG_CHANNEL_ID"
         }
     },
     "features": {

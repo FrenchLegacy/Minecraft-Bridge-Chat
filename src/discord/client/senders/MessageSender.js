@@ -78,7 +78,8 @@ class MessageSender {
 
         this.channels = {
             chat: null,
-            staff: null
+            staff: null,
+            statusLog: null
         };
 
         // Rate limiting
@@ -210,7 +211,20 @@ class MessageSender {
             }
             this.channels.staff = staffChannel;
 
-            logger.discord(`Validated Discord channels - Chat: ${chatChannel.name}, Staff: ${staffChannel.name}`);
+            // Load status log channel (optional)
+            const statusChannelId = this.config.get('discord.logChannels.botStatus');
+            if (statusChannelId) {
+                const statusLogChannel = await this.client.channels.fetch(statusChannelId);
+                if (statusLogChannel) {
+                    this.channels.statusLog = statusLogChannel;
+                    logger.discord(`Validated Discord channels - Chat: ${chatChannel.name}, Staff: ${staffChannel.name}, StatusLog: ${statusLogChannel.name}`);
+                } else {
+                    logger.warn(`Status log channel not found: ${statusChannelId}`);
+                    logger.discord(`Validated Discord channels - Chat: ${chatChannel.name}, Staff: ${staffChannel.name}`);
+                }
+            } else {
+                logger.discord(`Validated Discord channels - Chat: ${chatChannel.name}, Staff: ${staffChannel.name}`);
+            }
 
         } catch (error) {
             logger.logError(error, 'Failed to validate Discord channels');
@@ -423,7 +437,7 @@ class MessageSender {
         }
 
         try {
-            const channel = this.channels.chat; // Connection status goes to chat channel
+            const channel = this.channels.statusLog || this.channels.chat;
 
             if (!channel) {
                 throw new Error('Discord chat channel not available');
@@ -647,7 +661,7 @@ class MessageSender {
         }
 
         this.client = null;
-        this.channels = { chat: null, staff: null };
+        this.channels = { chat: null, staff: null, statusLog: null };
 
         logger.debug('Discord MessageSender cleaned up');
     }

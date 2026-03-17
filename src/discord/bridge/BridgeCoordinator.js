@@ -158,6 +158,18 @@ class BridgeCoordinator {
             this.handleMinecraftConnection(connectionData);
         });
 
+        // Send 'connected' status for bots that connected before the bridge was ready
+        const alreadyConnected = this.minecraftManager.getConnectedGuilds();
+        for (const guild of alreadyConnected) {
+            this.handleMinecraftConnection({
+                type: 'connected',
+                guildId: guild.guildId,
+                guildName: guild.guildName,
+                username: guild.username,
+                timestamp: new Date()
+            });
+        }
+
         logger.bridge('✅ Minecraft to Discord bridge setup completed');
     }
 
