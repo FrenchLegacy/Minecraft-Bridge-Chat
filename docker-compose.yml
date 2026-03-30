@@ -1,6 +1,6 @@
 services:
-  frenchlegacy-bridge-chat:
-    container_name: frenchlegacy-bridge-chat
+  frenchlegacy-bridge:
+    container_name: frenchlegacy-${FL_VOLUME_SUFFIX:-dev}-bridge
     build:
       context: .
       dockerfile: Dockerfile
@@ -9,6 +9,9 @@ services:
       - bridge_data:/app/data
     environment:
       - TZ=Europe/Paris
+      - NODE_ENV=${NODE_ENV:-development}
+    networks:
+      - fl-network
     restart: unless-stopped
     logging:
       driver: json-file
@@ -18,6 +21,8 @@ services:
     labels:
       - "user.frenchlegacy=allowed"
 
+
 volumes:
   bridge_data:
+    name: fl_bridge_${FL_VOLUME_SUFFIX:-dev}
     driver: local
