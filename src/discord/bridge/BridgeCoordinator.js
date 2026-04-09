@@ -598,7 +598,7 @@ class BridgeCoordinator {
     async sendDetectionNotification(eventData, guildConfig) {
         try {
             // Only send notifications for specific event types
-            const notifiableEvents = ['welcome', 'leave', 'promote', 'demote'];
+            const notifiableEvents = ['welcome', 'leave', 'kick', 'promote', 'demote'];
             if (!notifiableEvents.includes(eventData.type)) {
                 return;
             }
@@ -635,7 +635,11 @@ class BridgeCoordinator {
                 case 'leave':
                     notificationMessage = `[GUILD LEAVE] ${eventData.username} left ${guildConfig.name}`;
                     break;
-                    
+
+                case 'kick':
+                    notificationMessage = `[GUILD KICK] ${eventData.username} kicked from ${guildConfig.name}`;
+                    break;
+
                 case 'promote':
                     notificationMessage = `[GUILD PROMOTE] ${eventData.username} was promoted to ${eventData.toRank || 'Unknown Rank'} in ${guildConfig.name}`;
                     break;
