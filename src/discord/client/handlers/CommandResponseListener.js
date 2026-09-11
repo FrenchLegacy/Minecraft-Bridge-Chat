@@ -48,6 +48,7 @@ const EventEmitter = require('events');
 const BridgeLocator = require("../../../bridgeLocator.js");
 const { getPatternLoader } = require("../../../config/PatternLoader.js");
 const logger = require("../../../shared/logger");
+const resolveLogTarget = require("../../utils/resolveLogTarget.js");
 
 /**
  * CommandResponseListener - Tracks Discord command responses from Minecraft
@@ -847,10 +848,10 @@ class CommandResponseListener extends EventEmitter {
                 return;
             }
 
-            // Get the channel
-            const channel = await client.channels.fetch(channelId).catch(() => null);
+            // Get the target (text channel or forum topic)
+            const channel = await resolveLogTarget(client, channelId);
             if (!channel) {
-                logger.warn(`Could not find Discord log channel: ${channelId}`);
+                logger.warn(`Could not use Discord log target: ${channelId}`);
                 return;
             }
 

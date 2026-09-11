@@ -44,6 +44,7 @@ const logger = require("../../shared/logger");
 const CommandResponseListener = require("../client/handlers/CommandResponseListener.js");
 const kickReasonStore = require("../../shared/KickReasonStore.js");
 const metrics = require("../../shared/BridgeMetrics.js");
+const resolveLogTarget = require("../utils/resolveLogTarget.js");
 
 /**
  * BridgeCoordinator - Coordinate bidirectional message bridging
@@ -947,10 +948,10 @@ class BridgeCoordinator {
                 return;
             }
 
-            // Get the channel
-            const channel = await client.channels.fetch(channelId).catch(() => null);
+            // Get the target (text channel or forum topic)
+            const channel = await resolveLogTarget(client, channelId);
             if (!channel) {
-                logger.warn(`Could not find Discord log channel: ${channelId}`);
+                logger.warn(`Could not use Discord log target: ${channelId}`);
                 return;
             }
 

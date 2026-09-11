@@ -167,12 +167,13 @@
             ]
         },
         "logChannels": {
-            "default": "DEFAULT_LOG_CHANNEL_ID",
-            "invite": "INVITE_LOG_CHANNEL_ID",
-            "kick": "KICK_LOG_CHANNEL_ID",
-            "promote": "PROMOTE_LOG_CHANNEL_ID",
-            "demote": "DEMOTE_LOG_CHANNEL_ID",
-            "setrank": "SETRANK_LOG_CHANNEL_ID",
+            "_comment": "Log targets: a classic text channel ID OR a forum topic ID (a forum post is a thread and owns its own ID). Guild events (invite/kick/promote/demote/setrank) can all point to a single 'log guild' topic, everything else falls back to 'default'.",
+            "default": "OTHER_LOG_TOPIC_ID",
+            "invite": "GUILD_LOG_TOPIC_ID",
+            "kick": "GUILD_LOG_TOPIC_ID",
+            "promote": "GUILD_LOG_TOPIC_ID",
+            "demote": "GUILD_LOG_TOPIC_ID",
+            "setrank": "GUILD_LOG_TOPIC_ID",
             "botStatus": "BOTSTATUS_LOG_CHANNEL_ID"
         }
     },
