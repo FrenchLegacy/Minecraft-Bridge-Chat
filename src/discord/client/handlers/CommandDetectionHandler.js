@@ -48,6 +48,7 @@ const { Events } = require('discord.js');
 
 // Specific Imports
 const logger = require('../../../shared/logger');
+const getAuditLogger = require('../../../shared/auditLogger');
 const BridgeLocator = require('../../../bridgeLocator.js');
 
 /**
@@ -202,17 +203,32 @@ class CommandDetectionHandler {
             const pseudoInteraction = this.createPseudoInteraction(message, commandName, options);
             
             // Execute the command
-            logger.discord(`Executing detected command: ${commandName} from user ${message.author.tag}`);
+            const logMethod = pseudoInteraction.commandOrigin === 'automatic' ? 'debug' : 'discord';
+            logger[logMethod](`Processing detected command: ${commandName} from user ${message.author.tag}`);
             
             // This calls the same command.execute() function as slash commands
-            await command.execute(pseudoInteraction, {
+            const execute = () => command.execute(pseudoInteraction, {
                 client: this.client,
                 config: this.config,
                 bridgeLocator: BridgeLocator.getInstance()
             });
 
-            // React with success
-            await message.react('✅');
+            const audit = getAuditLogger(this.client);
+            const result = audit ? await audit.trackCommand(pseudoInteraction, execute) : await execute();
+
+            const status = result?.status || 'unknown';
+            logger[logMethod](`Handled detected command: ${commandName} from user ${message.author.tag} (status: ${status})`);
+            const reactions = {
+                success: '✅',
+                sent: '📤',
+                denied: '❌',
+                invalid: '❌',
+                failed: '❌',
+                timeout: '⏱️',
+                partial: '⚠️',
+                unknown: '❓'
+            };
+            await message.react(reactions[status] || reactions.unknown);
 
         } catch (error) {
             logger.logError(error, `Error executing detected command: ${message.content}`);
@@ -419,7 +435,11 @@ class CommandDetectionHandler {
 
         const pseudoInteraction = {
             // Basic properties
+            id: message.id,
             commandName,
+            commandOrigin: message.author.bot && commandName === 'guild' && options.subcommand === 'info'
+                ? 'automatic'
+                : (message.author.bot ? 'bot' : 'human'),
             user: message.author,
             member: message.member,
             channel: message.channel,

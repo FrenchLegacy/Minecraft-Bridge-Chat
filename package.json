@@ -27,6 +27,8 @@
 	"homepage": "https://github.com/Fabien83560/Minecraft-Bridge-Chat#readme",
 	"dependencies": {
 		"@discordjs/rest": "^2.6.0",
+		"@frenchlegacy/api-client": "file:vendor/frenchlegacy-api-client-1.2.0.tgz",
+		"@frenchlegacy/logging": "file:vendor/frenchlegacy-logging-0.2.0.tgz",
 		"discord-api-types": "^0.38.24",
 		"discord.js": "^14.22.1",
 		"mineflayer": "^4.33.0",

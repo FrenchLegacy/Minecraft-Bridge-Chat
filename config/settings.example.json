@@ -1,4 +1,37 @@
 {
+    "internalApi": {
+        "baseUrl": "http://frenchlegacy-api:10000",
+        "apiKey": "",
+        "timeout": 10000
+    },
+    "audit": {
+        "_comment": "Nouveau journal commun. IDs de posts de forum existants. Activer après intégration API et recette ; sans ce bloc, les anciennes routes restent utilisées.",
+        "enabled": false,
+        "environment": "production",
+        "maxBytes": 26214400,
+        "posts": {
+            "commandes": "",
+            "sanctions": "",
+            "messages": "",
+            "membres": "",
+            "roles": "",
+            "verification": "",
+            "guildes": "",
+            "connexions-jeu": "",
+            "xp": "",
+            "tickets": "",
+            "carries": "",
+            "giveaways": "",
+            "events": "",
+            "prives": "",
+            "technique": "",
+            "statut-bots": "",
+            "archive-candidatures": "",
+            "archive-tickets": "",
+            "archive-commissions": "",
+            "archive-carriers": ""
+        }
+    },
     "app": {
         "name": "Minecraft-Bridge-Chat",
         "version": "1.0.0",

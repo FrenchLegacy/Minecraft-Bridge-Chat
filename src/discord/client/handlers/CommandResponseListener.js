@@ -48,6 +48,7 @@ const EventEmitter = require('events');
 const BridgeLocator = require("../../../bridgeLocator.js");
 const { getPatternLoader } = require("../../../config/PatternLoader.js");
 const logger = require("../../../shared/logger");
+const getAuditLogger = require("../../../shared/auditLogger");
 const resolveLogTarget = require("../../utils/resolveLogTarget.js");
 
 /**
@@ -168,6 +169,8 @@ class CommandResponseListener extends EventEmitter {
             
             // Check recently resolved listeners
             for (const [listenerId, resolvedData] of recentlyResolved) {
+                // A late event after a timeout or failure is new evidence, not a duplicate success.
+                if (resolvedData.result?.success !== true) continue;
                 if (instance.checkListenerMatch(listenerId, resolvedData, eventData, "RECENTLY_RESOLVED")) {
                     return true;
                 }
@@ -748,10 +751,7 @@ class CommandResponseListener extends EventEmitter {
             clearTimeout(listener.timeout);
         }
 
-        // Send command log to Discord if successful
-        if (result.success) {
-            this.sendCommandLog(listener, result);
-        }
+        this.sendCommandLog(listener, result);
 
         // Remove message handlers
         try {
@@ -813,7 +813,26 @@ class CommandResponseListener extends EventEmitter {
      * @param {object} result - Command result
      */
     async sendCommandLog(listener, result) {
+        if (listener.interaction?.commandOrigin === 'automatic') {
+            return;
+        }
+
         try {
+            const audit = getAuditLogger();
+            if (audit) {
+                const status = result.type === 'timeout' ? 'timeout' : result.type === 'cancelled' ? 'unknown' : result.success === true && !result.error ? 'success' : result.success === false || result.error ? 'failed' : 'unknown';
+                return await audit.publish({
+                    eventType: 'guild.command_result', category: 'guildes', status,
+                    command: 'guild', subcommand: listener.commandType,
+                    actorId: listener.interaction?.user?.id, targetId: listener.targetPlayer,
+                    origin: listener.interaction?.commandOrigin,
+                    correlationId: listener.interaction?.id || listener.id,
+                    minecraftGuildId: listener.guildId,
+                    title: 'Commande de guilde : ' + listener.commandType,
+                    description: result.error || result.message,
+                    fields: [{ name: 'Guilde', value: listener.guildId }, { name: 'Joueur', value: listener.targetPlayer }]
+                });
+            }
             const mainBridge = BridgeLocator.getInstance();
             const discordManager = mainBridge.getDiscordManager?.();
             
@@ -864,12 +883,15 @@ class CommandResponseListener extends EventEmitter {
             const { EmbedBuilder } = require('discord.js');
 
             // Determine status color and emoji based on result
-            const isSuccess = !result.error;
-            const statusColor = isSuccess ? 0x00FF00 : 0xFF0000; // Green for success, red for error
-            const statusEmoji = isSuccess ? '✅' : '❌';
+            const isSuccess = result.success === true && !result.error;
+            const isTimeout = result.type === 'timeout';
+            const isCancelled = result.type === 'cancelled';
+            const status = isTimeout ? 'Timed Out' : isCancelled ? 'Cancelled' : isSuccess ? 'Succeeded' : result.success === false ? 'Failed' : 'Unknown';
+            const statusColor = isTimeout ? 0xFFA500 : isCancelled ? 0x808080 : isSuccess ? 0x00FF00 : 0xFF0000;
+            const statusEmoji = isTimeout ? '⏱️' : isCancelled ? '⚪' : isSuccess ? '✅' : '❌';
 
             const embed = new EmbedBuilder()
-                .setTitle(`${statusEmoji} ${this.capitalizeFirst(listener.commandType)} Command ${isSuccess ? 'Executed' : 'Failed'}`)
+                .setTitle(`${statusEmoji} ${this.capitalizeFirst(listener.commandType)} Command ${status}`)
                 .setColor(statusColor)
                 .setTimestamp()
                 .setFooter({ text: '🔧 Guild Command System' });
@@ -928,7 +950,7 @@ class CommandResponseListener extends EventEmitter {
             const responseTitle = isSuccess ? '📝 Response' : '⚠️ Error Details';
             const responseValue = result.error 
                 ? `\`\`\`${result.error}\`\`\`` 
-                : (result.message || 'Command completed successfully');
+                : (result.message || (isSuccess ? 'Command completed successfully' : 'Command success was not confirmed'));
 
             embed.addFields({
                 name: responseTitle,

@@ -40,6 +40,7 @@
 // Specific Imports
 const BridgeLocator = require("../../bridgeLocator.js");
 const logger = require("../../shared/logger");
+const getAuditLogger = require("../../shared/auditLogger");
 
 const CommandResponseListener = require("../client/handlers/CommandResponseListener.js");
 const kickReasonStore = require("../../shared/KickReasonStore.js");
@@ -304,6 +305,12 @@ class BridgeCoordinator {
         try {
             logger.debug(`[MC→DC] Processing event: ${JSON.stringify(eventData)}`);
             
+            const audit = getAuditLogger();
+            const guildConfig = this.getGuildConfig(eventData.guildId);
+            if (audit && guildConfig && !CommandResponseListener.hasActiveListenerForEvent(eventData)) {
+                await this.sendEventLog(eventData, guildConfig);
+            }
+
             // Skip if event bridging is disabled
             if (!this.routingConfig.eventsToDiscord) {
                 logger.debug(`[MC→DC] Event bridging disabled, skipping event`);
@@ -311,7 +318,6 @@ class BridgeCoordinator {
             }
 
             // Get guild configuration
-            const guildConfig = this.getGuildConfig(eventData.guildId);
             if (!guildConfig) {
                 metrics.dropped('mc_to_discord', 'guild_config_missing', `event ${eventData.type}, guildId ${eventData.guildId}`);
                 return;
@@ -346,8 +352,6 @@ class BridgeCoordinator {
             logger.debug(`[MC→DC] Event: ${eventData.type} - Player: ${eventData.username} - Guild: ${eventData.guildId}`);
             logger.debug(`[MC→DC] ================================`);
             
-            const CommandResponseListener = require("../client/handlers/CommandResponseListener.js");
-            
             // Check if CommandResponseListener class exists
             logger.debug(`[MC→DC] CommandResponseListener class available: ${!!CommandResponseListener}`);
             
@@ -370,7 +374,7 @@ class BridgeCoordinator {
             
             if (hasActiveListener) {
                 logger.debug(`[MC→DC] ✅ Skipping event log - Discord command listener will handle logging for ${eventData.type} event`);
-            } else {
+            } else if (!audit) {
                 logger.debug(`[MC→DC] ❌ No active listener found - sending event log to Discord channels...`);
                 await this.sendEventLog(eventData, guildConfig);
             }
@@ -917,6 +921,17 @@ class BridgeCoordinator {
      */
     async sendEventLog(eventData, guildConfig) {
         try {
+            const audit = getAuditLogger();
+            if (audit) {
+                const connection = ['join', 'disconnect'].includes(eventData.type);
+                return await audit.publish({
+                    eventType: 'guild.' + eventData.type, category: connection ? 'connexions-jeu' : 'guildes', status: 'success',
+                    minecraftGuildId: guildConfig.id, targetId: eventData.username,
+                    title: guildConfig.name + ' — ' + eventData.type, description: eventData.raw,
+                    fields: [{ name: 'Guilde', value: guildConfig.name }, { name: 'Joueur', value: eventData.username || 'inconnu' }]
+                });
+            }
+
             const mainBridge = BridgeLocator.getInstance();
             const discordManager = mainBridge.getDiscordManager?.();
             
@@ -1003,6 +1018,7 @@ class BridgeCoordinator {
     getEventLogChannel(eventType, logChannels) {
         // Map event types to channel configurations
         const eventChannelMap = {
+            'welcome': logChannels.invite || logChannels.default,
             'join': logChannels.invite || logChannels.default,
             'leave': logChannels.kick || logChannels.default, 
             'kick': logChannels.kick || logChannels.default,

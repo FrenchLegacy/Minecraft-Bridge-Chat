@@ -32,6 +32,7 @@ const MessageHandler = require("./handlers/MessageHandler.js");
 const SlashCommandHandler = require("./handlers/SlashCommandHandler.js");
 const CommandDetectionHandler = require('./handlers/CommandDetectionHandler');
 const logger = require("../../shared/logger");
+const getAuditLogger = require("../../shared/auditLogger");
 
 /**
  * DiscordBot - Discord.js client wrapper with handler management
@@ -92,6 +93,8 @@ class DiscordBot extends EventEmitter {
                     GatewayIntentBits.GuildMessageReactions
                 ]
             });
+
+            this.auditLogger = getAuditLogger(this.client);
 
             // Initialize handlers (they will be connected to client later)
             this.messageHandler = new MessageHandler();
@@ -331,6 +334,7 @@ class DiscordBot extends EventEmitter {
      * @throws {Error} If connection fails after max attempts
      */
     async start() {
+        this.auditLogger?.start();
         try {
             logger.discord('Starting Discord bot...');
 
@@ -418,6 +422,7 @@ class DiscordBot extends EventEmitter {
      * @returns {Promise<void>}
      */
     async stop() {
+        await this.auditLogger?.close();
         try {
             logger.discord('Stopping Discord bot...');
 

@@ -159,11 +159,11 @@ class GuildCommandManager {
                     content: `You do not have permission to use the \`${subcommandName}\` command.`,
                     ephemeral: true
                 });
-                return;
+                return { status: 'denied' };
             }
         }
 
-        await subcommand.execute(interaction, context);
+        return await subcommand.execute(interaction, context);
     }
 
     /**
@@ -518,7 +518,7 @@ module.exports = {
         const subcommandName = interaction.options.getSubcommand();
         
         try {
-            await guildCommandManager.executeSubcommand(subcommandName, interaction, context);
+            return await guildCommandManager.executeSubcommand(subcommandName, interaction, context);
             
         } catch (error) {
             logger.logError(error, `Error executing guild subcommand: ${subcommandName}`);
@@ -530,6 +530,7 @@ module.exports = {
             } else {
                 await interaction.reply({ content: errorMessage, ephemeral: true });
             }
+            return { status: 'failed' };
         }
     },
 };

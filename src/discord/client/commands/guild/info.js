@@ -73,7 +73,7 @@ module.exports = {
         // Defer the reply since this might take some time
         await interaction.deferReply({ ephemeral: true });
 
-        await handleInfoCommand(interaction, context);
+        return await handleInfoCommand(interaction, context);
     },
 };
 
@@ -102,9 +102,10 @@ module.exports = {
  */
 async function handleInfoCommand(interaction, context) {
     const guildName = interaction.options.getString("guildname");
+    const logMethod = interaction.commandOrigin === 'automatic' ? 'debug' : 'discord';
 
     try {
-        logger.discord(`[GUILD-INFO] Processing info command: ${guildName}`);
+        logger[logMethod](`[GUILD-INFO] Processing info command: ${guildName}`);
 
         // Get Minecraft manager
         const minecraftManager = context.bridgeLocator.getMinecraftManager?.();
@@ -113,7 +114,7 @@ async function handleInfoCommand(interaction, context) {
                 content: "❌ Minecraft manager not available. Please try again later.",
                 ephemeral: true,
             });
-            return;
+            return { status: 'failed' };
         }
 
         // Find guild configuration by name
@@ -125,7 +126,7 @@ async function handleInfoCommand(interaction, context) {
                 ).join(", ")}`,
                 ephemeral: true,
             });
-            return;
+            return { status: 'invalid' };
         }
 
         // Send initial response
@@ -144,7 +145,7 @@ async function handleInfoCommand(interaction, context) {
                 content: `❌ Guild \`${guildName}\` is not currently connected to Minecraft.`,
                 ephemeral: true,
             });
-            return;
+            return { status: 'failed' };
         }
 
         // Fetch guild info from Minecraft /g info command
@@ -164,7 +165,9 @@ async function handleInfoCommand(interaction, context) {
         const embed = createGuildInfoEmbed(guildConfig, guildData, onlineCount);
         await interaction.editReply({ embeds: [embed], ephemeral: true });
 
-        logger.discord(`[GUILD-INFO] ✅ Successfully displayed info for ${guildName}`);
+        const status = guildData ? 'success' : 'partial';
+        logger[logMethod](`[GUILD-INFO] Displayed info for ${guildName} (status: ${status})`);
+        return { status };
     } catch (error) {
         logger.logError(error, `[GUILD-INFO] Unexpected error processing info command`);
 
@@ -180,6 +183,7 @@ async function handleInfoCommand(interaction, context) {
             .setTimestamp();
 
         await interaction.editReply({ embeds: [errorEmbed], ephemeral: true });
+        return { status: 'failed' };
     }
 }
 

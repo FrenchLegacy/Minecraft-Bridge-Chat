@@ -39,6 +39,7 @@ const { EventEmitter } = require('events');
 
 // Specific Imports
 const logger = require('../../../shared/logger');
+const getAuditLogger = require('../../../shared/auditLogger');
 const BridgeLocator = require('../../../bridgeLocator.js');
 
 /**
@@ -290,23 +291,30 @@ class SlashCommandHandler extends EventEmitter {
             }
 
             try {
-                // Check permissions if required
-                if (command.permission && !this.hasPermission(interaction.member, command.permission)) {
-                    await interaction.reply({
-                        content: 'You do not have permission to use this command.',
-                        ephemeral: true
-                    });
-                    return;
-                }
+                const execute = async () => {
+                    // Check permissions if required
+                    if (command.permission && !this.hasPermission(interaction.member, command.permission)) {
+                        logger.discord(`Handled slash command: ${interaction.commandName} by ${interaction.user.displayName} (status: denied)`);
+                        await interaction.reply({
+                            content: 'You do not have permission to use this command.',
+                            ephemeral: true
+                        });
+                        return { status: 'denied' };
+                    }
 
-                // Execute command with full context
-                await command.execute(interaction, {
-                    client: this.client,
-                    config: this.config,
-                    bridgeLocator: BridgeLocator.getInstance()
-                });
-                
-                logger.discord(`Executed slash command: ${interaction.commandName} by ${interaction.user.displayName}`);
+                    // Execute command with full context
+                    const result = await command.execute(interaction, {
+                        client: this.client,
+                        config: this.config,
+                        bridgeLocator: BridgeLocator.getInstance()
+                    });
+
+                    logger.discord(`Handled slash command: ${interaction.commandName} by ${interaction.user.displayName} (status: ${result?.status || 'unknown'})`);
+                    return result;
+                };
+                const audit = getAuditLogger(this.client);
+                if (audit) await audit.trackCommand(interaction, execute);
+                else await execute();
 
             } catch (error) {
                 logger.logError(error, `Error executing slash command: ${interaction.commandName}`);

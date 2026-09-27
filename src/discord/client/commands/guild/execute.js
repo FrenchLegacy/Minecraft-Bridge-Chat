@@ -186,7 +186,7 @@ module.exports = {
      */
     async execute(interaction, context) {
         await interaction.deferReply({ ephemeral: true });
-        await handleExecuteCommand(interaction, context);
+        return await handleExecuteCommand(interaction, context);
     }
 };
 
@@ -245,7 +245,7 @@ async function handleExecuteCommand(interaction, context) {
             await interaction.editReply({
                 content: '❌ Minecraft manager not available. Please try again later.'
             });
-            return;
+            return { status: 'failed' };
         }
 
         // Find guild configuration
@@ -254,7 +254,7 @@ async function handleExecuteCommand(interaction, context) {
             await interaction.editReply({
                 content: `❌ Guild \`${guildName}\` not found. Available guilds: ${getAvailableGuilds(context.config).join(', ')}`
             });
-            return;
+            return { status: 'invalid' };
         }
 
         // Get bot manager and check connection
@@ -263,7 +263,7 @@ async function handleExecuteCommand(interaction, context) {
             await interaction.editReply({
                 content: `❌ Guild \`${guildName}\` is not currently connected to Minecraft.`
             });
-            return;
+            return { status: 'failed' };
         }
 
         // Check if user accidentally included /g or /guild prefix
@@ -271,7 +271,7 @@ async function handleExecuteCommand(interaction, context) {
             await interaction.editReply({
                 content: '❌ Do not include `/g` or `/guild` prefix in the command. Just provide the command itself.'
             });
-            return;
+            return { status: 'invalid' };
         }
 
         // Format the final command with /g prefix
@@ -280,20 +280,24 @@ async function handleExecuteCommand(interaction, context) {
         try {
             // Execute the command (fire-and-forget, no response tracking)
             await botManager.executeCommand(guildConfig.id, finalCommand);
-            
-            logger.discord(`[GUILD-EXECUTE] Command sent to ${guildName}: ${finalCommand}`);
-            
-            // Create and send success response
-            const successEmbed = createSuccessEmbed(guildName, finalCommand);
-            await interaction.editReply({ embeds: [successEmbed] });
-
         } catch (commandError) {
             logger.logError(commandError, `[GUILD-EXECUTE] Failed to execute command: ${finalCommand}`);
             
             // Create and send error response
             const errorEmbed = createErrorEmbed(guildName, finalCommand, commandError.message);
             await interaction.editReply({ embeds: [errorEmbed] });
+            return { status: 'failed' };
         }
+
+        logger.discord(`[GUILD-EXECUTE] Command sent to ${guildName}: ${finalCommand}`);
+
+        try {
+            const successEmbed = createSuccessEmbed(guildName, finalCommand);
+            await interaction.editReply({ embeds: [successEmbed] });
+        } catch (replyError) {
+            logger.logError(replyError, '[GUILD-EXECUTE] Command sent, but confirmation could not be delivered');
+        }
+        return { status: 'sent' };
 
     } catch (error) {
         logger.logError(error, `[GUILD-EXECUTE] Unexpected error processing execute command`);
@@ -306,5 +310,6 @@ async function handleExecuteCommand(interaction, context) {
             .setTimestamp();
         
         await interaction.editReply({ embeds: [errorEmbed] });
+        return { status: 'failed' };
     }
 }
