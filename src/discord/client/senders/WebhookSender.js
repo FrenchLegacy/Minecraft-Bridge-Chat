@@ -149,7 +149,7 @@ class WebhookSender {
      * Create webhook for a specific channel
      * 
      * Creates a new webhook in the specified channel if the bot has ManageWebhooks permission.
-     * Logs the webhook URL that should be added to configuration.
+     * Logs the webhook ID without exposing its authentication token.
      * 
      * @async
      * @private
@@ -182,7 +182,6 @@ class WebhookSender {
             this.webhooks[channelType] = webhook;
             
             logger.discord(`Created webhook for ${channelType} channel: ${webhook.id}`);
-            logger.info(`💡 Add this webhook URL to your config: ${webhook.url}`);
 
         } catch (error) {
             logger.logError(error, `Failed to create webhook for ${channelType} channel`);

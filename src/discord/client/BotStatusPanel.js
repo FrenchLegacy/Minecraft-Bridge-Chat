@@ -428,6 +428,14 @@ class BotStatusPanel {
             if (!interaction.isButton()) return;
             if (!interaction.customId.startsWith('bsp_')) return;
 
+            if (!this._hasControlPermission(interaction.member)) {
+                await interaction.reply({
+                    content: '❌ Vous n’avez pas la permission de contrôler les bots Minecraft.',
+                    ephemeral: true
+                });
+                return;
+            }
+
             // customId format: bsp_<action>_<guildId>
             // guildId may itself contain underscores, so split only on first two
             const withoutPrefix = interaction.customId.slice('bsp_'.length);
@@ -491,6 +499,21 @@ class BotStatusPanel {
                 }
             }
         });
+    }
+
+    _hasControlPermission(member) {
+        if (!member) return false;
+
+        const adminRoles = this.config.get('discord.permissions.adminRoles') || [];
+        const moderatorRoles = this.config.get('discord.permissions.moderatorRoles') || [];
+        const hasConfiguredRole = member.roles.cache.some(role =>
+            adminRoles.includes(role.id) || adminRoles.includes(role.name) ||
+            moderatorRoles.includes(role.id) || moderatorRoles.includes(role.name)
+        );
+
+        return hasConfiguredRole ||
+            member.permissions.has('Administrator') ||
+            member.permissions.has('ManageMessages');
     }
 
     // ==================== CONNECTION EVENT HANDLER ====================
