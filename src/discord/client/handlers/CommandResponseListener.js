@@ -49,6 +49,7 @@ const BridgeLocator = require("../../../bridgeLocator.js");
 const { getPatternLoader } = require("../../../config/PatternLoader.js");
 const logger = require("../../../shared/logger");
 const resolveLogTarget = require("../../utils/resolveLogTarget.js");
+const { getAudit, setOutcome, auditIdentity, classifyGuildCommandResult } = require("../../../shared/audit");
 
 /**
  * CommandResponseListener - Tracks Discord command responses from Minecraft
@@ -503,6 +504,36 @@ class CommandResponseListener extends EventEmitter {
         }
     }
 
+    /**
+     * Signale que la commande vient d'être écrite en jeu
+     *
+     * À appeler par la commande Discord juste après l'envoi (executeCommand se
+     * résout quand la file d'envoi a réellement écrit la commande). En mode audit,
+     * émet `guild.command.sent` : étape intermédiaire « envoyée en jeu » entre la
+     * commande Discord et la réponse du jeu, sous la même corrélation. Discret :
+     * en base seulement.
+     *
+     * @param {string} listenerId - Listener ID
+     */
+    markSent(listenerId) {
+        const listener = this.activeListeners.get(listenerId);
+        if (!listener || listener.sentAt) {
+            return;
+        }
+
+        listener.sentAt = Date.now();
+
+        // Le journal ne doit jamais faire échouer la commande qui vient de partir.
+        try {
+            const audit = getAudit();
+            if (audit) {
+                this.publishCommandSentAudit(audit, listener);
+            }
+        } catch (error) {
+            logger.logError(error, `Failed to log sent command for listener ${listenerId}`);
+        }
+    }
+
     // ==================== MESSAGE HANDLING ====================
 
     /**
@@ -748,8 +779,12 @@ class CommandResponseListener extends EventEmitter {
             clearTimeout(listener.timeout);
         }
 
-        // Send command log to Discord if successful
-        if (result.success) {
+        // Mode audit : TOUS les résultats, échecs et délais dépassés compris (seuls
+        // les succès étaient journalisés). Sinon, comportement historique.
+        const audit = getAudit();
+        if (audit) {
+            this.publishCommandAudit(audit, listener, result);
+        } else if (result.success) {
             this.sendCommandLog(listener, result);
         }
 
@@ -798,6 +833,93 @@ class CommandResponseListener extends EventEmitter {
     }
 
     // ==================== DISCORD LOGGING ====================
+
+    /**
+     * Champs communs aux événements d'audit d'une commande de guilde : acteur et
+     * corrélation de la commande Discord d'origine (pied fl-meta compris), cible,
+     * guilde Minecraft, commande `g` et sous-commande.
+     *
+     * @private
+     * @param {object} listener - Listener configuration
+     * @returns {object} Base d'événement pour AuditLogger.publish
+     */
+    commandAuditBase(listener) {
+        const guilds = BridgeLocator.getInstance()?.config?.get('guilds') || [];
+        const guild = guilds.find(g => g.id === listener.guildId);
+        return {
+            category: 'guildes',
+            // Sans interaction (appel interne) : le bridge agit de lui-même.
+            origin: 'bot',
+            ...auditIdentity(listener.interaction),
+            command: 'g',
+            subcommand: listener.commandType,
+            targetId: listener.targetPlayer || undefined,
+            minecraftGuildId: guild?.name || listener.guildId,
+            title: `🎮 /g ${listener.commandType} ${listener.targetPlayer || ''}`.trim(),
+            fields: [
+                { name: 'Commande', value: `\`${listener.command}\`` },
+                { name: 'Guilde', value: guild?.name || listener.guildId }
+            ]
+        };
+    }
+
+    /**
+     * Mode audit : la commande est partie en jeu (étape « sent », en base seulement).
+     *
+     * @private
+     */
+    async publishCommandSentAudit(audit, listener) {
+        try {
+            const outcome = await audit.publish({
+                ...this.commandAuditBase(listener),
+                eventType: 'guild.command.sent',
+                status: 'sent',
+                quiet: true,
+                context: { stage: 'sent' }
+            });
+            if (!outcome.accepted && outcome.reason !== 'filtered') {
+                logger.warn(`[Audit] Envoi de /g ${listener.commandType} non journalisé : ${outcome.reason}`);
+            }
+        } catch (error) {
+            logger.logError(error, 'Échec du journal de l\'envoi de commande');
+        }
+    }
+
+    /**
+     * Mode audit : résultat d'une commande de guilde exécutée en jeu, rattaché à
+     * la commande Discord qui l'a demandée (même correlationId que son suivi).
+     *
+     * Statut : `success`, `denied` (refus du jeu), `invalid` (demande impossible
+     * telle quelle), `failed` ou `timeout`. `context.errorCode` porte le code court
+     * et `context.reason` la réponse du jeu (texte système, jamais un message de
+     * joueur) — voir shared/audit/guildCommand.js.
+     *
+     * @private
+     */
+    async publishCommandAudit(audit, listener, result) {
+        try {
+            const interaction = listener.interaction;
+            const { status, errorCode, reason } = classifyGuildCommandResult(result);
+            // La commande Discord qui attend cette réponse prend le même résultat
+            // (sinon « unknown » : la commande ne sait pas ce que le jeu a répondu).
+            if (interaction) setOutcome(interaction, status);
+            const base = this.commandAuditBase(listener);
+            if (!result.success && result.error) base.fields.push({ name: 'Erreur', value: String(result.error) });
+            if (result.message) base.fields.push({ name: 'Réponse du jeu', value: String(result.message) });
+            if (errorCode) base.fields.push({ name: 'Code', value: errorCode });
+            const outcome = await audit.publish({
+                ...base,
+                eventType: `guild.command.${listener.commandType}`,
+                status,
+                context: { durationMs: Date.now() - listener.createdAt, stage: 'response', errorCode, reason }
+            });
+            if (!outcome.accepted && outcome.reason !== 'filtered') {
+                logger.warn(`[Audit] Résultat de /g ${listener.commandType} non journalisé : ${outcome.reason}`);
+            }
+        } catch (error) {
+            logger.logError(error, 'Échec du journal du résultat de commande');
+        }
+    }
 
     /**
      * Send command log to Discord channel

@@ -218,6 +218,8 @@ async function handleUnmuteCommand(interaction, context) {
 
       // Execute the command on Minecraft server
       await connection.executeCommand(command);
+      // Journal d'audit : étape « envoyée en jeu » (guild.command.sent)
+      responseListener.markSent(listenerId);
 
       // Wait for Minecraft response (15 second timeout)
       const result = await responseListener.waitForResult(listenerId);

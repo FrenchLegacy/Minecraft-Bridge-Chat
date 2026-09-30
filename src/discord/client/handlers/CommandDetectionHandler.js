@@ -49,6 +49,7 @@ const { Events } = require('discord.js');
 // Specific Imports
 const logger = require('../../../shared/logger');
 const BridgeLocator = require('../../../bridgeLocator.js');
+const { trackCommand, detectedOrigin, readDetectionMeta, reportError } = require('../../../shared/audit');
 
 /**
  * CommandDetectionHandler - Detects and executes text-based commands
@@ -123,6 +124,7 @@ class CommandDetectionHandler {
                 await this.handleMessage(message);
             } catch (error) {
                 logger.logError(error, 'Error in command detection handler');
+                reportError(error, 'commandDetection');
             }
         });
     }
@@ -204,12 +206,32 @@ class CommandDetectionHandler {
             // Execute the command
             logger.discord(`Executing detected command: ${commandName} from user ${message.author.tag}`);
             
+            // Journal d'audit : l'auteur du message est toujours un bot ; la consultation
+            // périodique (/guild info, /guild list) est « automatic » et n'est journalisée
+            // nulle part.
+            let subcommand = null;
+            try { subcommand = pseudoInteraction.options.getSubcommand(false); } catch {}
+            pseudoInteraction.commandOrigin = detectedOrigin(subcommand);
+            pseudoInteraction.channelId = message.channel?.id;
+            pseudoInteraction.guildId = message.guild?.id;
+
+            // Protocole du salon de détection (pied « fl-meta v1 » du premier embed) :
+            // l'humain à l'origine de la commande et la corrélation choisie par le bot
+            // Discord remplacent le bot et l'identifiant aléatoire, pour la commande,
+            // son envoi en jeu et la réponse du jeu. Sans pied : comportement historique.
+            const meta = readDetectionMeta(message);
+            if (meta) {
+                // Pseudo Discord de l'acteur : cache seulement, aucun appel à Discord.
+                const actor = meta.actorId ? this.client.users?.cache?.get(meta.actorId) : null;
+                pseudoInteraction.auditMeta = { ...meta, actorUsername: actor?.username, actorIsBot: actor?.bot };
+            }
+
             // This calls the same command.execute() function as slash commands
-            await command.execute(pseudoInteraction, {
+            await trackCommand(pseudoInteraction, () => command.execute(pseudoInteraction, {
                 client: this.client,
                 config: this.config,
                 bridgeLocator: BridgeLocator.getInstance()
-            });
+            }));
 
             // React with success
             await message.react('✅');

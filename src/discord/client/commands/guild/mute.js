@@ -296,6 +296,8 @@ async function handleMuteCommand(interaction, context) {
 
       // Execute the command through connection
       await connection.executeCommand(command);
+      // Journal d'audit : étape « envoyée en jeu » (guild.command.sent)
+      responseListener.markSent(listenerId);
 
       // Wait for response from listener
       const result = await responseListener.waitForResult(listenerId);

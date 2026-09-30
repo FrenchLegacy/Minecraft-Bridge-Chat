@@ -32,6 +32,7 @@ const MessageHandler = require("./handlers/MessageHandler.js");
 const SlashCommandHandler = require("./handlers/SlashCommandHandler.js");
 const CommandDetectionHandler = require('./handlers/CommandDetectionHandler');
 const logger = require("../../shared/logger");
+const { startAuditHeartbeat, reportError } = require("../../shared/audit");
 
 /**
  * DiscordBot - Discord.js client wrapper with handler management
@@ -139,6 +140,10 @@ class DiscordBot extends EventEmitter {
                 // Set bot activity/status
                 this.setBotActivity();
 
+                // Journal d'audit : battement de santé (POST /audit/heartbeat chaque
+                // minute, comptes Minecraft connectés) et événement bot.started.
+                startAuditHeartbeat();
+
                 // Emit connection event
                 this.emit('connection', {
                     type: 'connected',
@@ -207,6 +212,7 @@ class DiscordBot extends EventEmitter {
         // Shard events
         this.client.on('shardError', (error) => {
             logger.logError(error, 'Discord shard error');
+            reportError(error, 'discord.shard');
         });
 
         this.client.on('shardReady', () => {
