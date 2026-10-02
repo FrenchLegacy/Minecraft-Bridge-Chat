@@ -177,6 +177,18 @@
             "botStatus": "BOTSTATUS_LOG_CHANNEL_ID"
         }
     },
+    "audit": {
+        "_comment": "Journal commun @frenchlegacy/logging (src/shared/audit). Retirer ce bloc = retour à discord.logChannels. Événements de guilde et résultats des commandes en jeu → post guildes ; commandes Discord → post commandes. Le panneau de statut et le salon de détection ne sont pas concernés.",
+        "enabled": true,
+        "environment": "production",
+        "_comment_apiKey": "API_KEY_BRIDGE de FrenchLegacy-API/.env",
+        "apiKey": "CHANGE_ME_BRIDGE_KEY",
+        "_comment_posts": "Un post par catégorie affichée. Facultatifs : technique (erreurs applicatives app.error). Sans post, la catégorie part en base seulement. connexions-jeu (guild.player.join / guild.player.leave) et statut-bots (bot.started / bot.stopped) ne vont jamais sur Discord : aucun post à prévoir.",
+        "posts": {
+            "guildes": "1553848018984374292",
+            "commandes": "1553847754243973291"
+        }
+    },
     "features": {
         "logging": {
             "level": "info",

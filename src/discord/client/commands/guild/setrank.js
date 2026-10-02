@@ -213,6 +213,8 @@ async function handleSetRankCommand(interaction, context) {
     try {
       // Execute command on Minecraft server
       await botManager.executeCommand(guildConfig.id, command);
+      // Journal d'audit : étape « envoyée en jeu » (guild.command.sent)
+      responseListener.markSent(listenerId);
       logger.discord(
         `[GUILD-SETRANK] Command sent to ${guildName}: ${command}`
       );

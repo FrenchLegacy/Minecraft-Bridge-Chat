@@ -82,12 +82,12 @@
         ],
         "kick": [
           {
-            "pattern": "(\\w+) was kicked from the guild by (\\w+)",
+            "pattern": "(\\w+) was kicked from the guild by (?:\\[[^\\]]+\\] )?(\\w+)",
             "groups": ["username", "kicker"],
             "description": "Standard kick message"
           },
           {
-            "pattern": "(\\w+) was removed from the guild by (\\w+)",
+            "pattern": "(\\w+) was removed from the guild by (?:\\[[^\\]]+\\] )?(\\w+)",
             "groups": ["username", "kicker"],
             "description": "Alternative kick message"
           },

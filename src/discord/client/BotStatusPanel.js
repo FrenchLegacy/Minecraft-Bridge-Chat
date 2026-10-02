@@ -26,6 +26,7 @@ const path = require('path');
 
 const BridgeLocator = require('../../bridgeLocator');
 const logger = require('../../shared/logger');
+const { trackInteraction, setOutcome, reportError } = require('../../shared/audit');
 
 const PANEL_STORAGE_PATH = path.join(__dirname, '../../../data/bot-status-panel.json');
 
@@ -427,78 +428,92 @@ class BotStatusPanel {
         this.client.on(Events.InteractionCreate, async (interaction) => {
             if (!interaction.isButton()) return;
             if (!interaction.customId.startsWith('bsp_')) return;
+            // Journal d'audit : clic suivi en base sous un nom stable (bsp_disconnect…)
+            const name = 'bsp_' + (interaction.customId.slice('bsp_'.length).split('_')[0] || 'action');
+            await trackInteraction(interaction, name, () => this._handleButton(interaction));
+        });
+    }
 
-            if (!this._hasControlPermission(interaction.member)) {
-                await interaction.reply({
-                    content: '❌ Vous n’avez pas la permission de contrôler les bots Minecraft.',
-                    ephemeral: true
-                });
+    /**
+     * Corps historique du gestionnaire de boutons du panneau.
+     *
+     * @private
+     */
+    async _handleButton(interaction) {
+        if (!this._hasControlPermission(interaction.member)) {
+            setOutcome(interaction, 'denied');
+            await interaction.reply({
+                content: '❌ Vous n’avez pas la permission de contrôler les bots Minecraft.',
+                ephemeral: true
+            });
+            return;
+        }
+
+        // customId format: bsp_<action>_<guildId>
+        // guildId may itself contain underscores, so split only on first two
+        const withoutPrefix = interaction.customId.slice('bsp_'.length);
+        const separatorIdx = withoutPrefix.indexOf('_');
+        if (separatorIdx === -1) return;
+
+        const action  = withoutPrefix.slice(0, separatorIdx);
+        const guildId = withoutPrefix.slice(separatorIdx + 1);
+
+        const guild = (this.config.getEnabledGuilds() || []).find(g => g.id === guildId);
+        if (!guild) return;
+
+        try {
+            await interaction.deferReply({ ephemeral: true });
+
+            const minecraftManager = BridgeLocator.getInstance().getMinecraftManager?.();
+
+            if (!minecraftManager) {
+                await interaction.editReply({ content: '❌ Minecraft manager non disponible.' });
                 return;
             }
 
-            // customId format: bsp_<action>_<guildId>
-            // guildId may itself contain underscores, so split only on first two
-            const withoutPrefix = interaction.customId.slice('bsp_'.length);
-            const separatorIdx = withoutPrefix.indexOf('_');
-            if (separatorIdx === -1) return;
+            // Record who clicked before executing the action
+            const actionRecord = {
+                type: action,
+                userId: interaction.user.id,
+                userTag: interaction.user.tag,
+                timestamp: Date.now()
+            };
+            const currentData = this.statusData.get(guildId) || {};
+            currentData.lastAction = actionRecord;
+            this.statusData.set(guildId, currentData);
 
-            const action  = withoutPrefix.slice(0, separatorIdx);
-            const guildId = withoutPrefix.slice(separatorIdx + 1);
+            if (action === 'disconnect') {
+                await interaction.editReply({
+                    content: `🔌 Déconnexion du bot **${guild.name}** en cours…`
+                });
+                await minecraftManager.manualStop(guildId);
+                await interaction.editReply({
+                    content: `✅ Bot **${guild.name}** déconnecté.\nLa reconnexion automatique est suspendue jusqu'à une reconnexion manuelle.`
+                });
+                logger.discord(`BotStatusPanel: Manual disconnect for ${guild.name} by ${interaction.user.tag}`);
 
-            const guild = (this.config.getEnabledGuilds() || []).find(g => g.id === guildId);
-            if (!guild) return;
+            } else if (action === 'reconnect') {
+                await interaction.editReply({
+                    content: `🔄 Reconnexion du bot **${guild.name}** en cours…`
+                });
+                await minecraftManager.manualStart(guildId);
+                logger.discord(`BotStatusPanel: Manual reconnect for ${guild.name} by ${interaction.user.tag}`);
 
-            try {
-                await interaction.deferReply({ ephemeral: true });
-
-                const minecraftManager = BridgeLocator.getInstance().getMinecraftManager?.();
-
-                if (!minecraftManager) {
-                    await interaction.editReply({ content: '❌ Minecraft manager non disponible.' });
-                    return;
-                }
-
-                // Record who clicked before executing the action
-                const actionRecord = {
-                    type: action,
-                    userId: interaction.user.id,
-                    userTag: interaction.user.tag,
-                    timestamp: Date.now()
-                };
-                const currentData = this.statusData.get(guildId) || {};
-                currentData.lastAction = actionRecord;
-                this.statusData.set(guildId, currentData);
-
-                if (action === 'disconnect') {
-                    await interaction.editReply({
-                        content: `🔌 Déconnexion du bot **${guild.name}** en cours…`
-                    });
-                    await minecraftManager.manualStop(guildId);
-                    await interaction.editReply({
-                        content: `✅ Bot **${guild.name}** déconnecté.\nLa reconnexion automatique est suspendue jusqu'à une reconnexion manuelle.`
-                    });
-                    logger.discord(`BotStatusPanel: Manual disconnect for ${guild.name} by ${interaction.user.tag}`);
-
-                } else if (action === 'reconnect') {
-                    await interaction.editReply({
-                        content: `🔄 Reconnexion du bot **${guild.name}** en cours…`
-                    });
-                    await minecraftManager.manualStart(guildId);
-                    logger.discord(`BotStatusPanel: Manual reconnect for ${guild.name} by ${interaction.user.tag}`);
-
-                } else {
-                    await interaction.editReply({ content: '❌ Action inconnue.' });
-                }
-
-            } catch (error) {
-                logger.logError(error, `BotStatusPanel: Button handler error for ${interaction.customId}`);
-                try {
-                    await interaction.editReply({ content: `❌ Erreur : ${error.message}` });
-                } catch {
-                    // interaction already replied or timed out
-                }
+            } else {
+                await interaction.editReply({ content: '❌ Action inconnue.' });
             }
-        });
+
+        } catch (error) {
+            logger.logError(error, `BotStatusPanel: Button handler error for ${interaction.customId}`);
+            // L'erreur est absorbée ici : sans cela, le clic resterait « unknown ».
+            setOutcome(interaction, 'failed');
+            reportError(error, 'botStatusPanel.button');
+            try {
+                await interaction.editReply({ content: `❌ Erreur : ${error.message}` });
+            } catch {
+                // interaction already replied or timed out
+            }
+        }
     }
 
     _hasControlPermission(member) {

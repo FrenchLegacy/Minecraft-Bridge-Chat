@@ -68,6 +68,7 @@ const { join } = require('path');
 
 // Specific Imports
 const logger = require('../../../shared/logger');
+const { setOutcome } = require('../../../shared/audit');
 
 /**
  * GuildCommandManager - Manages guild subcommand loading and execution
@@ -155,6 +156,7 @@ class GuildCommandManager {
         if (subcommand.permission) {
             const hasPermission = this.checkPermission(interaction.member, subcommand.permission, context);
             if (!hasPermission) {
+                setOutcome(interaction, 'denied');
                 await interaction.reply({
                     content: `You do not have permission to use the \`${subcommandName}\` command.`,
                     ephemeral: true

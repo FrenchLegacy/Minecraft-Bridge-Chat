@@ -235,6 +235,8 @@ async function handleDemoteCommand(interaction, context) {
     try {
       // Execute command in Minecraft
       await botManager.executeCommand(guildConfig.id, command);
+      // Journal d'audit : étape « envoyée en jeu » (guild.command.sent)
+      responseListener.markSent(listenerId);
       logger.discord(`[GUILD-DEMOTE] Command sent to ${guildName}: ${command}`);
 
       // Wait for response from listener

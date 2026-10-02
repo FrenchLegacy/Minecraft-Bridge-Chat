@@ -29,6 +29,7 @@ const MinecraftManager = require('./minecraft/MinecraftManager.js');
 const DiscordManager = require('./discord/DiscordManager.js');
 const BridgeLocator = require("./bridgeLocator.js");
 const metrics = require('./shared/BridgeMetrics.js');
+const { getAudit, closeAudit, reportError } = require('./shared/audit');
 
 /**
  * MainBridge - Core application orchestrator
@@ -95,6 +96,10 @@ class MainBridge {
             await this.finalizeStartup();
 
             this._isRunning = true;
+
+            // Journal d'audit (si bloc `audit`) : relance tout de suite la livraison
+            // des événements restés dans data/audit lors d'un arrêt précédent.
+            getAudit();
             
             const uptime = Date.now() - this._startTime;
             logger.info("===========================================");
@@ -136,6 +141,14 @@ class MainBridge {
             if (this._minecraftManager) {
                 await this._minecraftManager.stop();
                 logger.info('✅ Minecraft connections stopped');
+            }
+
+            // Journal d'audit : dernière livraison avant de couper Discord ; le reste
+            // demeure dans data/audit et repart au prochain démarrage.
+            try {
+                await closeAudit();
+            } catch (error) {
+                logger.logError(error, 'Error while closing the audit log');
             }
 
             // Stop Discord connections
@@ -383,6 +396,7 @@ class MainBridge {
         // Handle connection errors
         this._minecraftManager.onError((error, guildId) => {
             logger.logError(error, `Minecraft connection error for guild: ${guildId}`);
+            reportError(error, 'minecraft.connection');
         });
 
         // Message and event handlers (processed by BridgeCoordinator)
@@ -422,6 +436,7 @@ class MainBridge {
         // Handle Discord errors
         this._discordManager.onError((error) => {
             logger.logError(error, 'Discord connection error');
+            reportError(error, 'discord.client');
         });
 
         // Handle Discord messages (for Discord to Minecraft bridging)
@@ -637,6 +652,8 @@ async function main() {
         await mainInstance.start();
     } catch (error) {
         logger.logError(error, 'Main function execution failed');
+        // Enregistré dans data/audit avant la sortie ; livré au prochain démarrage.
+        reportError(error, 'startup');
         process.exit(1);
     }
 }
@@ -681,6 +698,7 @@ async function handleShutdown(signal) {
         process.exit(0);
     } catch (error) {
         logger.logError(error, `Error during ${signal} shutdown`);
+        reportError(error, 'shutdown');
         process.exit(1);
     }
 }
@@ -693,6 +711,9 @@ async function handleShutdown(signal) {
  */
 process.on('uncaughtException', (error) => {
     logger.logError(error, 'Uncaught exception - process will exit');
+    // Journal d'audit : l'événement est écrit sur disque (data/audit) avant de
+    // rendre la main ; il sera livré au prochain démarrage.
+    reportError(error, 'uncaughtException');
     process.exit(1);
 });
 
@@ -712,6 +733,7 @@ process.on('unhandledRejection', (reason, promise) => {
         : new Error(`Unhandled promise rejection: ${reason}`);
 
     logger.logError(error, 'Unhandled promise rejection - bridge continues running');
+    reportError(error, 'unhandledRejection');
 });
 
 // Start the application if run directly

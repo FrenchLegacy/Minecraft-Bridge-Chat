@@ -3,6 +3,8 @@ FROM node:22-alpine AS builder
 RUN apk add --no-cache python3 make g++
 WORKDIR /app
 COPY package*.json ./
+# @frenchlegacy/logging : archive locale (dépendance file:), source dans FrenchLegacy-Logging
+COPY vendor/ ./vendor/
 RUN npm install --production
 
 

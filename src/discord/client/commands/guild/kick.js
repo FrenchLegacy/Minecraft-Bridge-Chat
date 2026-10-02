@@ -267,6 +267,8 @@ async function handleKickCommand(interaction, context) {
         try {
             // Execute command in Minecraft
             await botManager.executeCommand(guildConfig.id, command);
+            // Journal d'audit : étape « envoyée en jeu » (guild.command.sent)
+            responseListener.markSent(listenerId);
             
             logger.discord(`[GUILD-KICK] Command sent to ${guildName}: ${command}`);
 

@@ -45,6 +45,25 @@ const CommandResponseListener = require("../client/handlers/CommandResponseListe
 const kickReasonStore = require("../../shared/KickReasonStore.js");
 const metrics = require("../../shared/BridgeMetrics.js");
 const resolveLogTarget = require("../utils/resolveLogTarget.js");
+const { getAudit, reportError } = require("../../shared/audit");
+
+// Journal d'audit : champ de l'événement de guilde qui porte son auteur, quand
+// Hypixel le donne (expulseur, inviteur, auteur du message du jour…).
+const EVENT_ACTOR_FIELD = {
+    kick: 'kicker',
+    promote: 'promoter',
+    demote: 'demoter',
+    invite: 'inviter',
+    motd: 'changer',
+    misc: 'changer'
+};
+
+// Connexions et déconnexions des membres (« Guild > X joined. » / « left. ») :
+// événements du journal, catégorie connexions-jeu (base seulement).
+const PRESENCE_EVENT_TYPE = {
+    join: 'guild.player.join',
+    disconnect: 'guild.player.leave'
+};
 
 /**
  * BridgeCoordinator - Coordinate bidirectional message bridging
@@ -264,6 +283,7 @@ class BridgeCoordinator {
 
         } catch (error) {
             logger.logError(error, `Error bridging Minecraft message to Discord from guild ${messageData.guildId}`);
+            reportError(error, 'bridge.minecraftMessage');
         }
     }
 
@@ -303,6 +323,12 @@ class BridgeCoordinator {
     async handleMinecraftEvent(eventData) {
         try {
             logger.debug(`[MC→DC] Processing event: ${JSON.stringify(eventData)}`);
+
+            // Journal d'audit : connexions et déconnexions des membres, en base
+            // seulement. Émis avant tout filtre Discord (pont désactivé, Discord
+            // déconnecté, excludeFromDiscord, écoute de commande active) : ces
+            // filtres ne concernent que ce qui s'affiche sur Discord.
+            await this.publishPresenceAudit(eventData);
             
             // Skip if event bridging is disabled
             if (!this.routingConfig.eventsToDiscord) {
@@ -379,6 +405,7 @@ class BridgeCoordinator {
 
         } catch (error) {
             logger.logError(error, `Error bridging Minecraft event to Discord from guild ${eventData.guildId}`);
+            reportError(error, 'bridge.minecraftEvent');
         }
     }
 
@@ -595,6 +622,7 @@ class BridgeCoordinator {
 
         } catch (error) {
             logger.logError(error, `Unexpected error bridging Discord message to Minecraft`);
+            reportError(error, 'bridge.discordMessage');
             await this.handleBridgeError(messageData, error, successCount, connectedGuilds.length);
         }
     }
@@ -917,6 +945,11 @@ class BridgeCoordinator {
      */
     async sendEventLog(eventData, guildConfig) {
         try {
+            // Mode audit : post `guildes` du forum + base (arrivées et départs de
+            // la guilde compris, auparavant dans le fourre-tout `default`).
+            const audit = getAudit();
+            if (audit) return await this.publishEventAudit(audit, eventData, guildConfig);
+
             const mainBridge = BridgeLocator.getInstance();
             const discordManager = mainBridge.getDiscordManager?.();
             
@@ -966,6 +999,90 @@ class BridgeCoordinator {
 
         } catch (error) {
             logger.logError(error, `Failed to send event log to Discord for ${eventData.type} event`);
+        }
+    }
+
+    /**
+     * Mode audit : l'embed historique (UUID du joueur compris) devient un
+     * événement structuré de la catégorie `guildes`.
+     *
+     * - acteur : le joueur qui a agi quand Hypixel le donne (expulseur, inviteur,
+     *   promoteur, auteur du message du jour), en pseudo Minecraft ; l'origine est
+     *   alors `human`, sinon `system` ;
+     * - cible : le joueur concerné (l'invité pour une invitation) ;
+     * - contexte : `level` pour un niveau de guilde, `minecraftUuid` quand Mojang
+     *   a répondu. Jamais le texte d'un message (M19).
+     *
+     * @private
+     */
+    async publishEventAudit(audit, eventData, guildConfig) {
+        // Liste des joueurs en ligne : jamais journalisée (le paquet la filtre aussi).
+        if (eventData.type === 'online') return;
+        // Connexions et déconnexions : déjà journalisées par publishPresenceAudit.
+        if (PRESENCE_EVENT_TYPE[eventData.type]) return;
+
+        const playerName = value => (typeof value === 'string' && value && value !== 'system' ? value : undefined);
+        const target = playerName(eventData.type === 'invite' ? eventData.invited : eventData.username);
+        const actor = playerName(eventData[EVENT_ACTOR_FIELD[eventData.type]]);
+
+        // Un seul appel à Mojang : l'embed et le contexte partagent le résultat.
+        const uuid = target ? await fetchMinecraftUUID(target) : null;
+        const data = (await this.createEventLogEmbed(eventData, guildConfig, uuid)).toJSON();
+
+        const context = {};
+        if (uuid) context.minecraftUuid = uuid;
+        if (eventData.type === 'level' && Number.isInteger(eventData.level)) context.level = eventData.level;
+
+        const result = await audit.publish({
+            category: 'guildes',
+            eventType: `guild.${eventData.type}`,
+            status: 'success',
+            origin: actor ? 'human' : 'system',
+            actorId: actor,
+            targetId: target,
+            minecraftGuildId: guildConfig?.name,
+            title: data.title,
+            description: data.description,
+            fields: (data.fields || []).map(({ name, value }) => ({ name, value })),
+            context
+        });
+        if (!result.accepted && result.reason !== 'filtered') {
+            logger.warn(`[Audit] Événement ${eventData.type} non journalisé : ${result.reason}`);
+        }
+    }
+
+    /**
+     * Mode audit : connexion ou déconnexion d'un membre de guilde sur Hypixel
+     *
+     * `guild.player.join` / `guild.player.leave`, catégorie `connexions-jeu` : le
+     * paquet les envoie en base seulement, jamais sur Discord. Ne dépend d'aucun
+     * filtre Discord et n'échoue jamais : l'appelant poursuit son traitement.
+     *
+     * @private
+     * @param {object} eventData - Event data from Minecraft
+     */
+    async publishPresenceAudit(eventData) {
+        const eventType = PRESENCE_EVENT_TYPE[eventData?.type];
+        if (!eventType || !eventData.username) return;
+
+        try {
+            const audit = getAudit();
+            if (!audit) return;
+
+            const guildConfig = this.getGuildConfig(eventData.guildId);
+            const result = await audit.publish({
+                category: 'connexions-jeu',
+                eventType,
+                status: 'success',
+                origin: 'system',
+                targetId: eventData.username,
+                minecraftGuildId: guildConfig?.name || eventData.guildName || eventData.guildId
+            });
+            if (!result.accepted && !['filtered', 'disabled'].includes(result.reason)) {
+                logger.warn(`[Audit] Connexion en jeu (${eventData.type}) non journalisée : ${result.reason}`);
+            }
+        } catch (error) {
+            logger.logError(error, `Failed to log ${eventData.type} presence event`);
         }
     }
 
@@ -1038,6 +1155,8 @@ class BridgeCoordinator {
      * @param {string} [eventData.raw] - Raw event message
      * @param {object} guildConfig - Guild configuration
      * @param {string} guildConfig.name - Guild name
+     * @param {string|null} [knownUuid] - Player UUID already looked up by the caller
+     *        (null = not found); omitted = looked up here
      * @returns {EmbedBuilder} Discord embed ready to send
      * 
      * @example
@@ -1048,7 +1167,7 @@ class BridgeCoordinator {
      *   toRank: "Officer"
      * }, guildConfig);
      */
-    async createEventLogEmbed(eventData, guildConfig) {
+    async createEventLogEmbed(eventData, guildConfig, knownUuid) {
         const { EmbedBuilder } = require('discord.js');
         
         // Use green color like successful commands (events detected are always "successful")
@@ -1073,7 +1192,9 @@ class BridgeCoordinator {
             let playerValue = `\`${eventData.username}\``;
             
             try {
-                const uuid = await fetchMinecraftUUID(eventData.username);
+                // knownUuid: already looked up by the caller (null = not found), so
+                // the audit path does not query Mojang twice for the same player.
+                const uuid = knownUuid !== undefined ? knownUuid : await fetchMinecraftUUID(eventData.username);
                 if (uuid) {
                     // Format UUID with dashes (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
                     const formattedUUID = uuid.replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5');

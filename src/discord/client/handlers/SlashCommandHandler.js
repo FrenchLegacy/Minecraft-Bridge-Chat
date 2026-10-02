@@ -40,6 +40,7 @@ const { EventEmitter } = require('events');
 // Specific Imports
 const logger = require('../../../shared/logger');
 const BridgeLocator = require('../../../bridgeLocator.js');
+const { trackCommand, setOutcome, reportError } = require('../../../shared/audit');
 
 /**
  * SlashCommandHandler - Manages Discord slash commands
@@ -290,26 +291,31 @@ class SlashCommandHandler extends EventEmitter {
             }
 
             try {
-                // Check permissions if required
-                if (command.permission && !this.hasPermission(interaction.member, command.permission)) {
-                    await interaction.reply({
-                        content: 'You do not have permission to use this command.',
-                        ephemeral: true
-                    });
-                    return;
-                }
+                // Journal d'audit : réception + résultat (sans bloc `audit`, simple exécution)
+                await trackCommand(interaction, async () => {
+                    // Check permissions if required
+                    if (command.permission && !this.hasPermission(interaction.member, command.permission)) {
+                        setOutcome(interaction, 'denied');
+                        await interaction.reply({
+                            content: 'You do not have permission to use this command.',
+                            ephemeral: true
+                        });
+                        return;
+                    }
 
-                // Execute command with full context
-                await command.execute(interaction, {
-                    client: this.client,
-                    config: this.config,
-                    bridgeLocator: BridgeLocator.getInstance()
+                    // Execute command with full context
+                    await command.execute(interaction, {
+                        client: this.client,
+                        config: this.config,
+                        bridgeLocator: BridgeLocator.getInstance()
+                    });
                 });
                 
                 logger.discord(`Executed slash command: ${interaction.commandName} by ${interaction.user.displayName}`);
 
             } catch (error) {
                 logger.logError(error, `Error executing slash command: ${interaction.commandName}`);
+                reportError(error, `slashCommand.${interaction.commandName}`);
 
                 const errorMessage = 'There was an error while executing this command!';
                 

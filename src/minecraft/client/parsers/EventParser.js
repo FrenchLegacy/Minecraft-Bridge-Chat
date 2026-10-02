@@ -189,7 +189,7 @@ class EventParser {
      * - Pattern metadata (patternIndex, isCustomPattern)
      * 
      * Event-specific fields added based on type:
-     * - join/leave/kick: username, rank, reason
+     * - join/leave/kick: username, rank, reason, kicker (kick only)
      * - promote/demote: username, fromRank, toRank, promoter/demoter
      * - invite: inviter, invited, inviteAccepted
      * - online: count, membersList, members, onlineCount
@@ -266,6 +266,7 @@ class EventParser {
                 return {
                     ...baseResult,
                     username: eventMatch.username,
+                    kicker: eventMatch.kicker || null,
                     reason: eventMatch.reason || null,
                     wasKicked: true
                 };
