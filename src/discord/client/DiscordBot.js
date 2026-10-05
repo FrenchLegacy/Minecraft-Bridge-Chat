@@ -23,7 +23,7 @@
  */
 
 // Globals Imports
-const { Client, GatewayIntentBits, ActivityType } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, ActivityType } = require('discord.js');
 const EventEmitter = require('events');
 
 // Specific Imports
@@ -32,7 +32,7 @@ const MessageHandler = require("./handlers/MessageHandler.js");
 const SlashCommandHandler = require("./handlers/SlashCommandHandler.js");
 const CommandDetectionHandler = require('./handlers/CommandDetectionHandler');
 const logger = require("../../shared/logger");
-const { startAuditHeartbeat, reportError } = require("../../shared/audit");
+const { startAuditHeartbeat, reportError, logDirectMessage } = require("../../shared/audit");
 
 /**
  * DiscordBot - Discord.js client wrapper with handler management
@@ -84,14 +84,18 @@ class DiscordBot extends EventEmitter {
         try {
             // Create Discord client with necessary intents
             // GuildMessageReactions added for error handling (adding reaction emojis)
+            // DirectMessages + Partials.Channel: DMs to the bot are logged (post `prives`
+            // and database); without the partial, the first DM of an uncached channel is lost.
             this.client = new Client({
                 intents: [
                     GatewayIntentBits.Guilds,
                     GatewayIntentBits.GuildMessages,
                     GatewayIntentBits.MessageContent,
                     GatewayIntentBits.GuildMembers,
-                    GatewayIntentBits.GuildMessageReactions
-                ]
+                    GatewayIntentBits.GuildMessageReactions,
+                    GatewayIntentBits.DirectMessages
+                ],
+                partials: [Partials.Channel]
             });
 
             // Initialize handlers (they will be connected to client later)
@@ -187,6 +191,10 @@ class DiscordBot extends EventEmitter {
         // Message create event - forward to message handler
         this.client.on('messageCreate', async (message) => {
             if (!this._isReady)
+                return;
+
+            // DM to the bot: logged, never bridged
+            if (await logDirectMessage(message))
                 return;
 
             if (this.messageHandler) {

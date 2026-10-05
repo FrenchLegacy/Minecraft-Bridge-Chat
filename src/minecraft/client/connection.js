@@ -39,6 +39,7 @@ const logger = require("../../shared/logger");
 const StrategyManager = require("../servers/StrategyManager.js")
 const ChatQueue = require("./ChatQueue.js");
 const BridgeLocator = require("../../bridgeLocator.js");
+const { parseWhisper, logWhisper } = require("../../shared/audit");
 
 /**
  * MinecraftConnection - Manages individual bot connections
@@ -601,6 +602,13 @@ class MinecraftConnection {
      */
     async handleMessage(message) {
         try {
+            // Private message received in game: logged (post `prives` and database), never bridged
+            const whisper = parseWhisper(message.toString());
+            if (whisper) {
+                logWhisper(whisper, { guildName: this._guildConfig.name });
+                return;
+            }
+
             // Use strategy to check if this is a guild message and process it
             const guildMessageData = await this.strategyManager.handleMessage(this._bot, message, this._guildConfig);
             

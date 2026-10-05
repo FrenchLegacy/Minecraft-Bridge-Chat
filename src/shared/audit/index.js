@@ -36,7 +36,7 @@
 
 const path = require('path');
 const { randomUUID } = require('crypto');
-const { AuditLogger, collectSecrets, createHttpSenders, setOutcome } = require('@frenchlegacy/logging');
+const { AuditLogger, collectSecrets, createHttpSenders, setOutcome, directMessageEvent } = require('@frenchlegacy/logging');
 const BridgeLocator = require('../../bridgeLocator.js');
 const logger = require('../logger');
 const { classifyGuildCommandResult } = require('./guildCommand.js');
@@ -179,6 +179,74 @@ function detectedOrigin(subcommand) {
 }
 
 /**
+ * MP Discord reçu par le bot du bridge → post `prives` et base, texte compris
+ * (format commun aux trois bots : directMessageEvent du paquet). Ignore les
+ * bots et tout message hors DM. Sans bloc `audit`, sans effet ; ne lève jamais.
+ *
+ * @param {import('discord.js').Message} message
+ * @returns {Promise<boolean>} true si le message était un MP (traité ici)
+ */
+async function logDirectMessage(message) {
+    if (!message.channel?.isDMBased?.()) return false;
+    if (message.author?.bot) return true;
+    try {
+        const audit = getAudit();
+        if (!audit) return true;
+        const result = await audit.publish(directMessageEvent(message));
+        if (!result.accepted) logger.warn(`[Audit] MP de ${message.author.id} non journalisé : ${result.reason}`);
+    } catch (error) {
+        logger.error(`[Audit] MP non journalisé : ${error.message}`);
+    }
+    return true;
+}
+
+// MP reçu en jeu (Hypixel), texte brut sans codes couleur :
+// « From [MVP+] Zaneku: bonjour », « From Zaneku: bonjour » (sans grade).
+const WHISPER = /^From (?:\[([^\]]{1,20})\] )?(\w{1,16}): (.*)$/s;
+
+/**
+ * Lit un MP reçu en jeu.
+ * @param {string} text ligne du chat, sans codes couleur
+ * @returns {{rank: string|null, username: string, text: string}|null}
+ */
+function parseWhisper(text) {
+    const match = typeof text === 'string' ? WHISPER.exec(text.trim()) : null;
+    return match ? { rank: match[1] || null, username: match[2], text: match[3] } : null;
+}
+
+/**
+ * MP reçu en jeu par un compte du bridge → post `prives` et base, texte compris.
+ * L'expéditeur est un pseudo Minecraft (rangé par l'API dans actor_ref) ; la
+ * guilde du compte qui l'a reçu va dans minecraft_guild. Ni cible ni compte
+ * destinataire : la guilde suffit. Ne lève jamais.
+ *
+ * @param {{rank: string|null, username: string, text: string}} whisper parseWhisper()
+ * @param {{guildName?: string}} receiver guilde du compte Minecraft destinataire
+ */
+async function logWhisper(whisper, { guildName } = {}) {
+    try {
+        const audit = getAudit();
+        if (!audit) return;
+        const sender = `${whisper.rank ? `[${whisper.rank}] ` : ''}${whisper.username}`;
+        const result = await audit.publish({
+            category: 'prives',
+            eventType: 'whisper.received',
+            status: 'success',
+            origin: 'human',
+            actorId: whisper.username,
+            minecraftGuildId: guildName,
+            title: `💬 Message privé en jeu de ${sender}`,
+            description: whisper.text || '*(aucun texte)*',
+            fields: guildName ? [{ name: 'Guilde', value: guildName }] : [],
+            messageText: whisper.text
+        });
+        if (!result.accepted) logger.warn(`[Audit] MP en jeu de ${whisper.username} non journalisé : ${result.reason}`);
+    } catch (error) {
+        logger.error(`[Audit] MP en jeu non journalisé : ${error.message}`);
+    }
+}
+
+/**
  * Santé du bridge (T9) : à appeler quand le bot Discord est prêt. Le premier
  * appel émet aussi `bot.started`. Mesures : comptes Minecraft connectés et
  * configurés (guildes activées), lues à chaque battement.
@@ -222,5 +290,6 @@ async function closeAudit() {
 
 module.exports = {
     getAudit, trackCommand, trackInteraction, detectedOrigin, closeAudit, setOutcome,
-    readDetectionMeta, auditIdentity, classifyGuildCommandResult, startAuditHeartbeat, reportError
+    readDetectionMeta, auditIdentity, classifyGuildCommandResult, startAuditHeartbeat, reportError,
+    logDirectMessage, parseWhisper, logWhisper
 };

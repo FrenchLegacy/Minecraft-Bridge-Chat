@@ -186,7 +186,8 @@
         "_comment_posts": "Un post par catégorie affichée. Facultatifs : technique (erreurs applicatives app.error). Sans post, la catégorie part en base seulement. connexions-jeu (guild.player.join / guild.player.leave) et statut-bots (bot.started / bot.stopped) ne vont jamais sur Discord : aucun post à prévoir.",
         "posts": {
             "guildes": "1553848018984374292",
-            "commandes": "1553847754243973291"
+            "commandes": "1553847754243973291",
+            "prives": "1553848414901379203"
         }
     },
     "features": {
