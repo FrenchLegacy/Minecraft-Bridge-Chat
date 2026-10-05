@@ -149,8 +149,8 @@ async function handleInfoCommand(interaction, context) {
 
         // Fetch guild info from Minecraft /g info command
         let guildData = null;
-        let onlineCount = 0;
-        
+        let onlineCount = null;
+
         try {
             const infoData = await getGuildInfoFromMinecraft(botManager, guildConfig);
             guildData = infoData.guildInfo;
@@ -245,8 +245,8 @@ async function getGuildInfoFromMinecraft(botManager, guildConfig) {
                 const allMessages = messages.join("\n");
                 const guildInfo = parseGuildInfoResponse(allMessages);
                 
-                // Also get online count
-                let onlineCount = 0;
+                // Also get online count (null when unknown, never a made-up 0)
+                let onlineCount = null;
                 try {
                     onlineCount = await getOnlineMemberCount(botManager, guildConfig);
                 } catch (error) {
@@ -351,113 +351,107 @@ function parseGuildInfoResponse(message) {
 // ==================== MINECRAFT FUNCTIONS ====================
 
 /**
+ * Maximum wait for the /g online reply, counted from the moment the command
+ * is actually sent (the ChatQueue resolves on send, not on enqueue).
+ *
+ * Hypixel usually answers in under a second, but at peak hours it can take
+ * 10 to 20 seconds. The old fixed 3-second window turned every slow reply
+ * into a recorded "0 online". 15 seconds covers about 96% of the slow replies
+ * observed in production; anything slower is reported as unknown.
+ *
+ * @type {number}
+ */
+const ONLINE_REPLY_TIMEOUT_MS = 15000;
+
+/**
  * Get online member count from Minecraft bot
  * 
- * Executes the /g online command via the bot and counts the number
- * of online members from the response.
+ * Executes the /g online command via the bot and resolves as soon as the
+ * "Online Members: N" line of the response arrives.
  * 
  * @async
  * @param {object} botManager - Bot manager instance
  * @param {object} guildConfig - Guild configuration
- * @returns {Promise<number>} Number of online members
+ * @returns {Promise<number|null>} Number of online members, or null when no
+ *   reply arrived in time (unknown, which is not the same as 0)
  */
 async function getOnlineMemberCount(botManager, guildConfig) {
-    return new Promise(async (resolve, reject) => {
-        const messages = [];
-        const timeout = setTimeout(() => {
-            reject(new Error("Timeout waiting for online members"));
-        }, 10000);
+    // Get the bot connection directly
+    const mainBridge = require("../../../../bridgeLocator.js").getInstance();
+    const minecraftManager = mainBridge.getMinecraftManager();
+    const botManagerInstance = minecraftManager._botManager;
+    const connection = botManagerInstance.connections.get(guildConfig.id);
 
-        try {
-            // Get the bot connection directly
-            const mainBridge = require("../../../../bridgeLocator.js").getInstance();
-            const minecraftManager = mainBridge.getMinecraftManager();
-            const botManagerInstance = minecraftManager._botManager;
-            const connection = botManagerInstance.connections.get(guildConfig.id);
+    if (!connection || !connection._bot) {
+        throw new Error("No bot connection found");
+    }
 
-            if (!connection || !connection._bot) {
-                clearTimeout(timeout);
-                reject(new Error("No bot connection found"));
-                return;
+    const bot = connection._bot;
+
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        let timer = null;
+
+        const settle = (callback, value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            bot.removeListener("message", messageHandler);
+            callback(value);
+        };
+
+        // Resolve on the first line that carries the count
+        const messageHandler = (message) => {
+            const messageText = message.toString
+                ? message.toString()
+                : String(message);
+            const count = parseOnlineMembersCount(messageText.replace(/§[0-9a-fklmnor]/g, ""));
+
+            if (count !== null) {
+                settle(resolve, count);
             }
+        };
 
-            const bot = connection._bot;
+        bot.on("message", messageHandler);
 
-            // Listen to all messages for a short period
-            const messageHandler = (message) => {
-                const messageText = message.toString
-                    ? message.toString()
-                    : String(message);
-                const cleanMessage = messageText.replace(/§[0-9a-fklmnor]/g, "").trim();
-
-                if (cleanMessage && cleanMessage.length > 0) {
-                    messages.push(cleanMessage);
-                }
-            };
-
-            bot.on("message", messageHandler);
-
-            // Execute the command to get online members
-            await botManager.executeCommand(guildConfig.id, "/g online");
-
-            // Wait for messages to arrive
-            setTimeout(() => {
-                bot.removeListener("message", messageHandler);
-                clearTimeout(timeout);
-
-                // Parse online members from messages
-                const allMessages = messages.join("\n");
-                const onlineMembers = parseOnlineMembersCount(allMessages);
-                resolve(onlineMembers);
-            }, 3000); // Wait 3 seconds for all messages
-        } catch (error) {
-            clearTimeout(timeout);
-            reject(error);
-        }
+        // Execute the command to get online members; the deadline starts once it is sent
+        botManager.executeCommand(guildConfig.id, "/g online").then(
+            () => {
+                if (settled) return;
+                timer = setTimeout(() => {
+                    logger.warn(
+                        `[GUILD-INFO] [${guildConfig.name}] No /g online reply within ` +
+                        `${ONLINE_REPLY_TIMEOUT_MS / 1000}s, online count reported as unknown`
+                    );
+                    settle(resolve, null);
+                }, ONLINE_REPLY_TIMEOUT_MS);
+            },
+            (error) => settle(reject, error)
+        );
     });
 }
 
 /**
  * Parse online member count from command response
  * 
- * Extracts the number of online members from the /g online command response.
- * Looks for patterns like "Online (X):" or counts member names.
+ * Reads the "Online Members: N" line of the /g online response. The line must
+ * stand on its own, so a guild chat message quoting it does not match.
  * 
- * @param {string} message - Command response message
- * @returns {number} Number of online members
+ * @param {string} message - Command response message (one or more lines)
+ * @returns {number|null} Number of online members, or null if the message
+ *   does not contain the count
  */
 function parseOnlineMembersCount(message) {
-    if (!message) return 0;
+    if (!message) return null;
 
-    // Look for patterns like "Online (X): Player1, Player2, Player3"
-    const onlineMatch = message.match(/Online\s*\((\d+)\):/i);
-    if (onlineMatch) {
-        return parseInt(onlineMatch[1], 10) || 0;
-    }
-
-    // Alternative pattern: "Online Members: X"
-    const altMatch = message.match(/Online\s+Members?:\s*(\d+)/i);
-    if (altMatch) {
-        return parseInt(altMatch[1], 10) || 0;
-    }
-
-    // Fallback: try to count player names in the message
-    // This is less reliable but may work if the format is different
-    const lines = message.split("\n");
-    for (const line of lines) {
-        if (line.includes("Online") && line.includes(":")) {
-            // Try to extract a number near "Online"
-            const numberMatch = line.match(/(\d+)/);
-            if (numberMatch) {
-                const count = parseInt(numberMatch[1], 10);
-                if (count > 0 && count < 1000) { // Reasonable range
-                    return count;
-                }
-            }
+    for (const line of message.split("\n")) {
+        const match = line.trim().match(/^Online Members:\s*(\d+)$/i);
+        if (match) {
+            return parseInt(match[1], 10);
         }
     }
 
-    return 0;
+    return null;
 }
 
 // ==================== EMBED CREATION ====================
@@ -470,7 +464,7 @@ function parseOnlineMembersCount(message) {
  * 
  * @param {object} guildConfig - Guild configuration from settings
  * @param {object|null} guildData - Guild data from Hypixel API (null if not available)
- * @param {number} onlineCount - Number of currently online members
+ * @param {number|null} onlineCount - Number of currently online members (null if unknown)
  * @returns {EmbedBuilder} Formatted Discord embed
  */
 function createGuildInfoEmbed(guildConfig, guildData, onlineCount) {
@@ -539,7 +533,9 @@ function createGuildInfoEmbed(guildConfig, guildData, onlineCount) {
     // Online members
     embed.addFields({
         name: "🟢 Membres connectés",
-        value: onlineCount > 0 ? onlineCount.toString() : "0",
+        // "N/A" carries no digit: GuildInfoMonitor (FrenchLegacy-Discord) then skips the
+        // snapshot instead of recording 0 online.
+        value: onlineCount === null ? "N/A" : onlineCount.toString(),
         inline: true,
     });
 
