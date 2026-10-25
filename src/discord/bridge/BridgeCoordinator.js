@@ -43,6 +43,7 @@ const logger = require("../../shared/logger");
 
 const CommandResponseListener = require("../client/handlers/CommandResponseListener.js");
 const kickReasonStore = require("../../shared/KickReasonStore.js");
+const staffDirectory = require("../../shared/StaffDirectory.js");
 const metrics = require("../../shared/BridgeMetrics.js");
 const resolveLogTarget = require("../utils/resolveLogTarget.js");
 const { getAudit, reportError } = require("../../shared/audit");
@@ -530,6 +531,8 @@ class BridgeCoordinator {
                     const guild = await discordClient.guilds.fetch(messageData.messageRef.guildId);
                     const member = await guild.members.fetch(messageData.author.id);
                     const serverNickname = member.displayName;
+
+                    messageData.author.staff = staffDirectory.isStaffMember(member);
                     
                     // Parse format: "[number] Username"
                     const minecraftUsernameMatch = serverNickname.match(/^\[\d+\]\s*(.+)$/);
@@ -781,7 +784,8 @@ class BridgeCoordinator {
      * 
      * Format: `D > Username: message content`
      * Reply:  `D > Username répond à Target: message content`
-     * 
+     * Staff:  `D > [STAFF] Username: message content`
+     *
      * @param {object} messageData - Discord message data
      * @param {object} messageData.author - Message author
      * @param {string} messageData.author.displayName - Display name
@@ -806,10 +810,12 @@ class BridgeCoordinator {
         // Add Discord prefix to distinguish from native Minecraft messages
         const prefix = "D >";
         
+        const staffTag = messageData.author.staff ? `${staffDirectory.getTag()} ` : '';
+
         const replyTo = messageData.replyTo ? ` répond à ${messageData.replyTo.username}` : '';
-        
+
         // Format: D > Username: message content
-        return `${prefix} ${username}${replyTo}: ${content}`;
+        return `${prefix} ${staffTag}${username}${replyTo}: ${content}`;
     }
 
     /**

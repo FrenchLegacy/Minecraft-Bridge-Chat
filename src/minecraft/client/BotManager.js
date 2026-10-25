@@ -46,6 +46,7 @@ const BridgeLocator = require("../../bridgeLocator.js");
 const MinecraftConnection = require("./connection.js");
 const MessageCoordinator = require("../client/parsers/MessageCoordinator.js");
 const InterGuildManager = require("../../shared/InterGuildManager.js");
+const staffDirectory = require("../../shared/StaffDirectory.js");
 const logger = require("../../shared/logger");
 
 /**
@@ -311,7 +312,12 @@ class BotManager extends EventEmitter {
             
             // Add the strategy data to the result
             result.strategyData = guildMessageData;
-            
+
+            // Staff flag read by both the Discord and the inter-guild formatting
+            if (result.category === 'message') {
+                result.data.staff = staffDirectory.isStaffMinecraftName(result.data.username);
+            }
+
             // Log the processing result with [GUILD] prefix
             logger.bridge(`[GUILD] [${guildConfig.name}] Message processed - Category: ${result.category}, Type: ${result.data.type || 'unknown'}`);
             

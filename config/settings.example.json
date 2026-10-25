@@ -101,6 +101,12 @@
             "enabled": true,
             "avatarAPI": "https://minotar.net/helm/{username}/64.png"
         },
+        "staffTag": {
+            "_comment": "Prefix FrenchLegacy staff names on the other side of the bridge. Staff = Discord members holding one of these roles; in-game players are matched through their verified nickname [level] Name",
+            "enabled": true,
+            "tag": "[STAFF]",
+            "roles": ["ID_ROLE_STAFF"]
+        },
         "interGuild": {
             "enabled": true,
             "officerToGuildChat": false,

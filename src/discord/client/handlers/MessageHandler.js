@@ -366,7 +366,7 @@ class MessageHandler extends EventEmitter {
      * 
      * Fetches the replied-to message and extracts the name as displayed in the channel:
      * the server nickname for a member, the webhook name for a message bridged from
-     * Minecraft. Bracketed decorations ([377] level, [FL] guild tag) are stripped and
+     * Minecraft. Leading bracketed decorations ([377] level, [V1] guild tag, [STAFF]) are stripped and
      * the name is clamped to Minecraft username length so the bridged line stays within
      * the server chat limit.
      * 
@@ -385,7 +385,7 @@ class MessageHandler extends EventEmitter {
             const displayName = referenced.member?.displayName || referenced.author?.username;
             if (!displayName) return null;
 
-            const username = displayName.replace(/^\[[^\]]+\]\s*/, '').trim().substring(0, 16);
+            const username = displayName.replace(/^(?:\[[^\]]+\]\s*)+/, '').trim().substring(0, 16);
             if (!username) return null;
 
             logger.debug(`Resolved reply target to ${username}`);

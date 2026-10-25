@@ -46,6 +46,7 @@ const { WebhookClient } = require('discord.js');
 // Specific Imports
 const BridgeLocator = require("../../../bridgeLocator.js");
 const logger = require("../../../shared/logger");
+const staffDirectory = require("../../../shared/StaffDirectory.js");
 
 /**
  * WebhookSender - Manages Discord webhook message delivery
@@ -247,7 +248,7 @@ class WebhookSender {
 
         const payload = {
             content: message,
-            username: this.formatWebhookUsername(username, guildConfig),
+            username: this.formatWebhookUsername(username, guildConfig, messageData.staff === true),
             avatarURL: avatarUrl,
             allowedMentions: {
                 parse: [] // Disable all mentions for security
@@ -264,23 +265,27 @@ class WebhookSender {
      * Format username for webhook display
      * 
      * Formats the username for display in Discord, optionally adding guild tags
-     * for multi-guild setups when source tagging is enabled.
-     * 
+     * for multi-guild setups when source tagging is enabled, and the staff tag
+     * for FrenchLegacy staff members: `[V1] [STAFF] Player`.
+     *
      * @private
      * @param {string} username - Original Minecraft username
      * @param {object} guildConfig - Guild configuration
      * @param {string} guildConfig.tag - Guild tag for display
-     * @returns {string} Formatted username with optional guild tag
+     * @param {boolean} [isStaff=false] - Whether the player is FrenchLegacy staff
+     * @returns {string} Formatted username with optional guild and staff tags
      */
-    formatWebhookUsername(username, guildConfig) {
+    formatWebhookUsername(username, guildConfig, isStaff = false) {
         const interGuildConfig = this.config.get('bridge.interGuild');
-        
+
+        const name = isStaff ? `${staffDirectory.getTag()} ${username}` : username;
+
         // Add guild tag if enabled
         if (interGuildConfig.showSourceTag && guildConfig.tag) {
-            return `[${guildConfig.tag}] ${username}`;
+            return `[${guildConfig.tag}] ${name}`;
         }
 
-        return username;
+        return name;
     }
 
     // ==================== AVATAR MANAGEMENT ====================

@@ -42,6 +42,7 @@
 
 // Specific Imports
 const logger = require('./logger');
+const staffDirectory = require('./StaffDirectory.js');
 const { getTemplateLoader } = require('../config/TemplateLoader.js');
 
 /**
@@ -336,8 +337,11 @@ class MessageFormatter {
      * //            sourceGuildName: "GuildA", targetGuildName: "GuildB", ... }
      */
     buildMessageVariables(messageData, sourceGuildConfig, targetGuildConfig) {
+        const username = messageData.username || 'Unknown';
+
         const variables = {
-            username: messageData.username || 'Unknown',
+            // Staff tag travels with the name, so every template shows it: `[V1] [STAFF] Player: ...`
+            username: messageData.staff ? `${staffDirectory.getTag()} ${username}` : username,
             message: messageData.message || '',
             chatType: messageData.chatType || 'guild',
             rank: messageData.rank || null,

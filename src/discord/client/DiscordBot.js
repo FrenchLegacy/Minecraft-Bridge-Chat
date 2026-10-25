@@ -32,6 +32,7 @@ const MessageHandler = require("./handlers/MessageHandler.js");
 const SlashCommandHandler = require("./handlers/SlashCommandHandler.js");
 const CommandDetectionHandler = require('./handlers/CommandDetectionHandler');
 const logger = require("../../shared/logger");
+const staffDirectory = require("../../shared/StaffDirectory.js");
 const { startAuditHeartbeat, reportError, logDirectMessage } = require("../../shared/audit");
 
 /**
@@ -143,6 +144,10 @@ class DiscordBot extends EventEmitter {
 
                 // Set bot activity/status
                 this.setBotActivity();
+
+                // Staff tag: member list loaded in the background, not delaying the bridge
+                staffDirectory.attach(this.client, this.config)
+                    .catch(error => logger.logError(error, 'Failed to attach staff directory'));
 
                 // Journal d'audit : battement de santé (POST /audit/heartbeat chaque
                 // minute, comptes Minecraft connectés) et événement bot.started.
